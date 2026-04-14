@@ -3,23 +3,30 @@
   "evals": [
     {
       "id": 1,
-      "name": "axi-packet-buffer",
-      "prompt": "我需要为网络处理单元设计一个 AXI 数据包缓冲模块。具体需求：\n\n- 输入接口：AXI4-Stream 从接口，64 位数据宽度\n- 输出接口：AXI4-Stream 主接口，64 位数据宽度\n- 缓冲深度：128 字\n- 需要支持可配置的数据包长度阈值检测\n- 目标频率：500MHz（7nm 工艺）\n- 面积预算：<8000 个等效门\n- 必须支持独立的输入输出反压\n\n请帮我生成完整的设计文档。",
-      "expected_output": "一份完整的设计文档，遵循模板结构，包含：\n1. 需求总结（功能/非功能需求、不变量、非目标）\n2. 子模块规范表格\n3. 微架构设计（模块图、接口定义、FSM 定义、时序描述、CDC 策略、复位策略）\n4. PPA 技术说明\n5. 后端感知（关键路径估计）\n6. DFX 计划\n7. 风险评估表格\n\n文档应使用硬件语义而非软件伪代码。",
+      "name": "subsystem-architecture-packet-dispatch",
+      "prompt": "请为一个网络接收子系统做架构设计文档，而不是直接展开到所有叶子模块实现。背景如下：\n\n- 上游输入：AXI4-Stream，256-bit，支持 burst backpressure\n- 下游有 4 个处理通道，需要根据包头字段分发\n- 需要支持可配置的丢弃策略、优先级和统计计数\n- 目标频率：1GHz，5nm\n- 面积预算：中等，优先保证实现收敛\n- 当前对象仍然可能继续拆分，先不要把所有叶子模块定死\n- reset/test/clock 由上层平台定义，本设计只需要记录依赖假设\n\n请用适合 architecture mode 的方式产出文档。",
+      "expected_output": "一份 architecture mode 文档，重点包括：\n1. protocol/config、core control、datapath/storage 三层骨架\n2. ingress/schedule/egress 流向映射\n3. 能展开多少展开多少的模块树，并给每个节点标注 ready for module-design / needs further architecture / TBD\n4. 子块划分理由、接口契约矩阵、预算和关键边界\n5. 验证钩子与架构级不变量\n\n文档不应直接陷入所有叶子模块的详细 FSM 和逐周期实现。",
       "files": []
     },
     {
       "id": 2,
-      "name": "cdc-fifo",
-      "prompt": "我们需要在两个时钟域之间传递数据，需要一个异步 FIFO 模块。\n\n参数：\n- 写时钟域：200MHz\n- 读时钟域：156.25MHz（以太网 MAC 时钟）\n- 数据宽度：32 位\n- 深度：512 字\n- 需要空/满/ Almost-full 标志\n- Almost-full 阈值可配置\n- 目标工艺：28nm\n\n这是一个跨时钟域设计，CDC 处理很重要。请设计这个模块并特别关注 CDC 策略。",
-      "expected_output": "一份完整的设计文档，特别强调：\n1. 清晰的 CDC 策略（多比特数据使用格雷码计数器）\n2. 两个时钟域的明确划分\n3. 每个 CDC 跨越的信号列表\n4. 空指针同步的时序分析\n5. 同步器链的可靠性考虑\n6. FIFO 深度必须是 2 的幂（格雷码要求）\n\n必须包含完整的微架构描述和风险分析。",
+      "name": "module-design-async-fifo",
+      "prompt": "我们已经完成父级架构设计，现在需要对 leaf block `async_fifo` 做详细设计。需求如下：\n\n- 写时钟域：200MHz\n- 读时钟域：156.25MHz\n- 数据宽度：32 位\n- 深度：512 entries\n- 接口：写侧 valid/ready，读侧 valid/ready\n- 需要 empty/full/almost-full 标志，almost-full 阈值可配置\n- 目标工艺：28nm\n- 当前对象已经达到实现边界，请使用 module-design mode\n\n请生成模块级详细设计文档。",
+      "expected_output": "一份 module-design mode 文档，重点包括：\n1. 父级上下文和本模块职责边界\n2. 接口契约、参数范围、微架构、控制/指针组织、存储组织\n3. 正确的 CDC 说明：Gray code 用于 FIFO 指针同步，而不是任意 payload 总线传输\n4. 时序/管线、reset/test/integration 假设、实现关键边界\n5. invariants、corner cases、illegal cases、debug hooks 和风险",
       "files": []
     },
     {
       "id": 3,
-      "name": "uart-transmitter",
-      "prompt": "帮我为嵌入式系统设计一个 UART 发送器模块。\n\n规格：\n- 数据位：8 位\n- 停止位：1 位\n- 校验位：可选（奇/偶/无）\n- 波特率：可配置（9600、115200、921600）\n- 系统时钟：50MHz\n- 输入接口：APB 从接口用于配置\n- 数据输入：8 位并行数据 + valid 握手\n- 输出：单比特 tx 串行输出\n- 需要 TX 空闲状态指示\n\n这是一个低速控制模块，不需要复杂的流水线。请生成设计文档。",
-      "expected_output": "一份完整的设计文档，针对低速控制模块：\n1. 波特率生成器的时钟分频设计\n2. 从并行到串行的移位寄存器 FSM\n3. APB 接口适配子模块\n4. 校验位生成逻辑\n5. 单周期或多周期操作的时序说明\n6. 由于是低速设计，PPA 重点在面积而非速度\n7. DFX 特征：发送状态机可见性、波特率配置寄存器、发送计数器",
+      "name": "block-architecture-dma-read-engine",
+      "prompt": "请为 DMA read engine 做架构设计。已知这是某个更大数据搬运子系统里的一个子块，但它自己内部还需要继续拆分。\n\n需求：\n- AXI4 master 读内存，内部最多支持 16 个 outstanding read requests\n- 下游是流式消费者，存在 backpressure\n- 需要地址生成、请求跟踪、返回重组、错误上报、配置寄存器接口\n- 目标频率：800MHz，7nm\n- 需要把后续可以直接进入详细设计的子块标出来\n\n请用 architecture mode 产出，不要跳成 leaf module 详细设计。",
+      "expected_output": "一份 architecture mode 文档，重点包括：\n1. 三层主骨架，并允许核心控制层包含轻量协议状态处理\n2. ingress/schedule/egress 对请求发起、返回接收、重组输出的映射\n3. 继续下钻后的模块树和状态标注\n4. 为什么地址生成、request tracking、reorder/reassembly、cfg/protocol handling 要不要拆开的理由\n5. 后续哪些子块可以直接进入 module-design mode",
+      "files": []
+    },
+    {
+      "id": 4,
+      "name": "module-design-uart-tx-from-parent",
+      "prompt": "父级架构文档已经确定：`uart_subsystem` 被拆成 `apb_cfg_if`、`tx_ctrl`、`baud_gen`、`tx_shift_datapath` 四个子块，其中 `tx_ctrl` 已标记为 ready for module-design。现在请对 `tx_ctrl` 做模块级详细设计。\n\n约束：\n- 它负责发送启动/忙闲控制、与 `baud_gen` 协作推进位发送、处理 parity enable 和 stop-bit 选择\n- APB 协议细节留在 `apb_cfg_if`\n- 串行移位和数据保持留在 `tx_shift_datapath`\n- 系统时钟 50MHz\n- 需要 idle/busy 可见性和错误输入保护\n\n请用 module-design mode 产出，并保持与父级分工一致。",
+      "expected_output": "一份 module-design mode 文档，重点包括：\n1. 对父级架构的引用和职责边界\n2. 不把 APB 适配或移位 datapath 重新并入 `tx_ctrl`\n3. 清晰的控制状态机、接口契约、角落场景和 debug hooks\n4. 与 `baud_gen` 和 `tx_shift_datapath` 的协作规则\n5. 可直接指导 RTL 实现和验证的详细程度",
       "files": []
     }
   ]

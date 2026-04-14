@@ -1,265 +1,212 @@
 ---
 name: rtl-design
-description: Use when the user provides RTL requirements, interface constraints, clock/reset expectations, or PPA targets and needs a design document before writing RTL. Triggers on module partitioning, microarchitecture planning, pipeline cuts, FSM design, CDC/reset strategy, interface definition, or when rtl-impl needs architecture clarification before coding.
+description: Use when a digital design engineer needs architecture or detailed design documentation for an assigned ASIC subsystem, block, or RTL module before implementation. Triggers on subsystem layering, recursive module decomposition, protocol/config/control/datapath partitioning, interface contracts, microarchitecture planning, timing or pipeline decisions, CDC/reset/test assumptions, or when rtl-impl or rtl-verification needs a design handoff document.
 ---
 
-# RTL Design Document Generation
+# RTL Design For ASIC Handoff
 
-## Design Philosophy
+Generate design documents for digital design engineers. This skill does not replace system engineering or chip-level architecture work. It starts from an assigned subsystem, block, or module and produces a document that can drive RTL implementation and verification.
 
-Design before coding. A design document is a pre-coding constraint, not post-hoc documentation. Writing Verilog without a design document produces code that works in simulation but fails in integration, timing, or reuse.
+Do not select specific CBBs in this skill. Describe required structures such as FIFOs, storage arrays, arbiters, register slices, CDC structures, or counters by role and constraints only. Specific reuse mapping is deferred to `rtl-impl`.
 
-Requirements drive architecture. Start with what the module must do, constrain it with PPA budgets, then choose the simplest microarchitecture that satisfies both. Every design decision must be traceable to a requirement or a constraint — if you cannot explain why a pipeline stage exists, it should not exist.
+## Step 0: Determine The Mode
 
-## Before Starting the Design
+Choose one mode before designing:
 
-Before diving into requirements analysis, first inspect the user's request and local project context for existing modules, interface standards, and design conventions. Only ask the user about existing design context when it is missing and would change an architecture-level decision.
+- `architecture mode`: use when the current object still needs decomposition, when module boundaries are not final, or when the main task is to define layering, partitioning, budgets, and interface contracts.
+- `module-design mode`: use when the current object has reached an implementation boundary and can be described directly in terms of FSMs, datapaths, storage, timing, corner cases, and verification hooks.
 
-## Step 1: Requirements Analysis
+If the user already states the mode, follow it. Otherwise infer the mode from the request.
 
-Extract every constraint from the requirement spec. Missed requirements become change requests during integration, which cost 10x more than catching them here.
+Choose `module-design mode` only if most of these are true:
+- External interface contracts are stable
+- Main responsibility is single-purpose and bounded
+- The object does not still need to split into several major child blocks
+- The design can be described directly as FSM, datapath, storage, and timing behavior
 
-### Functional Requirements
+If the mode is still ambiguous after inspecting the request and project context, ask one question:
+`Is this object still being decomposed, or is it already ready for leaf/block-level detailed design?`
 
-For each requirement, extract:
-- **Interface**: protocol (AXI4-Stream, APB, custom handshake), port direction, active level
-- **Throughput**: sustained rate (transactions per cycle), burst behavior, idle cycles between transactions
-- **Latency**: first-response delay, pipeline depth tolerance, worst-case response bound
-- **Data format**: bit width, byte ordering, field mapping, alignment, parity or ECC
-- **Operating modes**: configuration modes, power states, bypass paths, test modes
+## Shared Rules
 
-### Non-Functional Constraints
+- Treat the current object as an ASIC subsystem, block, or module owned by a digital design engineer.
+- Use hardware semantics only: registers, combinational logic, valid/ready rules, storage ownership, clock edges, and cycle-level timing.
+- Record project dependencies explicitly. Do not invent chip-level policy for reset, DFT, clocking, test modes, power intent, or physical integration. If the project already defines them, inherit them. If not, list them as assumptions or open questions.
+- Do not default reset strategy to a house style. Reset choice is an integration dependency unless the user specifies it.
+- If reset, test, or clock interface names, active levels, or exact semantics are not explicitly provided by the user or parent document, describe them as inherited dependencies rather than inventing concrete ports or polarity.
+- Keep protocol adaptation and configuration semantics visible, but allow light protocol state handling inside the core control layer when that simplifies the design.
+- Make verification guidance part of the design output: invariants, corner cases, illegal cases, observability hooks, and assumptions that the verification plan must honor.
 
-These constraints shape microarchitecture decisions directly:
-- **Clock frequency**: determines pipeline depth. Ask the user if not specified.
-- **Area budget**: LUT/FF count or gate count estimate. Constrained area forces resource sharing.
-- **Power budget**: dynamic power limits force clock gating, operand isolation, or domain shutdown.
-- **Timing margin**: how much slack is acceptable after synthesis.
+## Architecture Mode
 
-### Invariants
+Use this mode for the current design layer when the object still needs structural decomposition.
 
-List every constraint that must hold under all conditions:
-- No packet reordering on a given flow ID
-- Backpressure must propagate within N clock cycles
-- All outputs driven to known state during reset
+### Step 1: Capture Scope And Constraints
 
-Invariants become assertions in the implementation phase.
+Extract and state:
+- What this object is responsible for in the parent system
+- External interfaces and protocol contracts
+- Throughput, latency, buffering, ordering, and QoS requirements
+- Area, frequency, power, and timing-margin budgets
+- Dependencies inherited from the platform: clocking, reset, test mode behavior, power-domain assumptions, macro boundaries, or integration restrictions
+- Open questions that could change the partitioning
 
-### Non-Goals
+### Step 2: Build The Layer Skeleton
 
-State what is explicitly out of scope. Non-goals prevent scope creep.
+Start with this default skeleton:
+- `protocol/config layer`
+- `core control layer`
+- `datapath/storage layer`
 
-### Handling Missing Information
+Then analyze the main flow as:
+- `ingress`
+- `schedule`
+- `egress`
 
-When requirements are incomplete, apply this rule: **make conservative assumptions and document them explicitly; only ask the user when the missing information would change an architecture-level decision.**
+Use the flow view to refine the layer view, not to replace it.
 
-Information that changes architecture (must ask if missing):
-- Clock frequency target
-- Interface protocol and handshake type
-- Throughput requirement
-- Number of clock domains
+### Step 3: Decompose Recursively
 
-Information that has standard defaults (assume and document):
-- Reset strategy → default: synchronous active-low, all outputs to idle
-- Pipeline structure → decide based on frequency target
-- Area budget → assume unconstrained unless specified
-- Parameter ranges → infer from requirements, document assumptions
+Expand the module tree as far as the current information supports. Do not stop at a shallow block diagram if additional structure is already clear.
 
-### Hardware Description Rules
+For every node in the tree, mark one status:
+- `ready for module-design`
+- `needs further architecture`
+- `TBD`
 
-Describe the design as hardware, not software. Do not write software pseudocode, imperative algorithms, or function-call narratives.
+### Step 4: Apply Partitioning Rules
 
-Every behavior description must be framed in terms of:
-- Registers and register boundaries
-- Combinational logic, muxes, datapath operators, and storage elements
-- FSMs, counters, FIFOs, arbiters, and handshakes
-- Clock edges, valid/ready behavior, and cycle-level timing
+Use these rules to keep the decomposition professional and consistent:
 
-If a design choice cannot be explained as hardware structure or cycle-level behavior, it is not specified well enough for RTL design.
+- Separate external protocol adaptation and CSR/config decode from core policy unless the logic is trivial and tightly coupled.
+- Separate throughput-critical datapath or storage ownership from heavy arbitration or multi-client control.
+- Split out a scheduler or arbiter when fairness, priority, ordering, or backpressure policy becomes a first-class concern.
+- Split out storage management when occupancy tracking, hazard handling, replay, buffering, or flow-control semantics dominate the design.
+- Do not mix unrelated ingress and egress protocol details into a single control block unless the object is very small and the coupling is essential.
+- Keep error, flush, retry, and recovery behavior explicit. They may stay in the core control layer, but they must not be hidden inside datapath prose.
+- Prefer boundaries that improve implementation and verification clarity over boundaries chosen only for aesthetic symmetry.
 
-## Step 2: Initial Sub-module Inventory
+Allocate budgets while partitioning rather than leaving them to the end:
+- Give storage-heavy blocks most of the area budget when buffering, descriptors, or queueing dominate the subsystem.
+- Reserve the tightest timing budget for the blocks on the likely throughput-critical path, then distribute looser timing targets to sideband, config, or statistics logic.
+- Assign latency budgets per major path segment such as ingress classify, schedule/route, and egress launch instead of only stating an end-to-end number.
+- If the budget split is still uncertain, mark it as provisional and explain which open question would move the allocation.
 
-Before full microarchitecture planning, draft the candidate sub-modules implied by the requirements. This is an initial inventory, not the final specification. Step 3 may merge, split, or refine these module boundaries.
+### Step 5: Produce The Architecture Document
 
-### What to Specify for Each Sub-module
+Use `references/architecture_design_template.md`.
 
-For every sub-module, document:
+The architecture document must include:
+- Layer map
+- Flow map
+- Recursive module tree with status per node
+- Partition rationale for every major child block
+- External and internal interface contracts
+- Budget allocation and integration-critical boundaries
+- Verification hooks and architecture-level invariants
+- Clear next-step handoff: which nodes are ready for detailed design next
 
-| Field | Description |
-|-------|-------------|
-| Name | Module identifier |
-| Type | Datapath / Control / Storage / Interface |
-| Function | What this module does — the behavioral requirement |
-| Interface | Ports with direction, width, clock domain, and protocol |
-| Performance | Throughput, latency requirements, and timing constraints |
-| Dependencies | Which other sub-modules it connects to and how |
+## Module-Design Mode
 
-### Specification Depth
+Use this mode only after the current object is stable enough to implement directly.
 
-At this stage, the inventory should be precise enough to support architecture exploration:
-- The major responsibilities and interfaces are clear
-- Likely module boundaries are visible for pipeline and CDC planning
-- Step 3 can refine the design without rediscovering the requirements
+### Step 1: Anchor The Parent Context
 
-But it should NOT include:
-- Specific CBB names or instantiation details (that is rtl-impl's responsibility)
-- RTL implementation details (signal assignments, encoding schemes)
-- Verification strategy (that is rtl-verification's responsibility)
+State:
+- Parent architecture document or parent block, if available
+- The module's exact responsibility and non-goals
+- Which parent-level contracts this module must satisfy
+- Which assumptions remain inherited from the parent instead of being redesigned here
 
-## Step 3: Microarchitecture Planning
+### Step 2: Freeze The Interface Contract
 
-Transform requirements and the initial sub-module inventory into a concrete microarchitecture. Refine the sub-module boundaries here until the architecture is stable enough that the final design document can hand off cleanly to rtl-impl and rtl-verification.
+Define:
+- Top-level ports and interface semantics
+- Valid/ready, request/ack, or bus timing rules
+- Ordering, flush, retry, error, and backpressure behavior
+- Parameter ranges and configuration effects
 
-### Module Partitioning
+If these are still unstable, stop and return to `architecture mode`.
 
-Decompose the design into sub-modules by function:
-- **Datapath modules**: data transformation, arithmetic, muxing, shifting — high-throughput paths where pipeline depth matters
-- **Control modules**: FSMs, sequencers, arbiters — generate control signals for the datapath
-- **Storage modules**: FIFOs, register files, buffers
-- **Interface modules**: protocol adapters, CDC modules, pad wrappers
+### Step 3: Describe The Microarchitecture
 
-Each sub-module should have a single clear purpose. A module that does arbitration and data transformation will be hard to reuse, hard to verify, and hard to meet timing.
+Describe the module in enough detail to hand off to implementation and verification:
+- Block diagram and local child blocks, if any
+- FSMs, schedulers, counters, scoreboards, and control-state ownership
+- Datapath and storage organization
+- Pipeline cuts, timing-sensitive paths, and buffering rationale
+- CDC, reset, test-mode, and integration assumptions that affect the module
+- Implementation-critical boundaries and deferred items
 
-### Data Flow Analysis
+Use explicit formats for control and timing:
+- For each FSM or scheduler, provide at least a state table and a state-transition view. Prefer Mermaid `stateDiagram-v2` when it stays readable; otherwise use a compact ASCII diagram plus a transition table.
+- For each timing-critical path, identify the source state or register boundary, the combinational work between stages, the preferred cut point, and why that cut point is chosen.
+- If a path is intentionally multi-cycle or rate-limited, say why that is architecturally safe and what contract makes it safe. Do not imply STA exceptions unless the design contract clearly justifies them.
+- When describing register insertion, explain whether it exists to break a long control chain, isolate a wide datapath, absorb backpressure, or localize fanout.
 
-Trace data from input to output:
-- **Throughput calculation**: at each pipeline stage, compute the sustained transfer rate. If stage 1 produces 1 word/cycle and stage 2 consumes 1 word every 2 cycles, a buffer is needed between them.
-- **Backpressure propagation**: for every valid/ready interface, trace how stall conditions propagate backward. A broken backpressure chain causes data loss.
-- **Buffer depth estimation**: for each inter-stage buffer, estimate minimum depth from the worst-case burst size, throughput mismatch between producer and consumer, and backpressure propagation latency. Include a safety margin (typically 20% or 2 entries, whichever is larger). Round up to the supported implementation granularity — often power-of-2 for FIFO-based buffers, but not universally required.
+### Step 4: Add Verification Guidance
 
-  Example: upstream bursts up to 8 words, downstream consumes at 50% rate, backpressure takes 2 cycles to propagate. Worst-case accumulation during burst = 8 words at 50% fill rate = 4 words, plus 2 words for propagation delay = 6. If backed by a power-of-2 FIFO, round up to 8; otherwise 6 is sufficient.
+State:
+- Invariants
+- Corner cases
+- Illegal cases
+- Observability and debug hooks
+- Risks and fallback strategies
 
-### Pipeline Decisions
+### Step 5: Produce The Module Design Document
 
-Choose the pipeline structure based on clock frequency target and combinational path depth:
+Use `references/module_design_template.md`.
 
-| Structure | When to Use | PPA Tradeoff |
-|-----------|-------------|--------------|
-| Single-cycle combinational | Path delay < 60% of clock period, simple logic | Lowest latency and area, but fails timing on complex paths |
-| Multi-cycle (state machine) | Complex operation that cannot complete in one cycle, low throughput | Acceptable for control-path operations, wastes cycles on throughput-critical paths |
-| Pipelined (registered stages) | Throughput is 1 transaction/cycle, path delay exceeds single-cycle budget | Maximum throughput at the cost of pipeline registers and initial fill latency |
+The module design document must be detailed enough that:
+- `rtl-impl` can choose structures and coding style without rediscovering the architecture
+- `rtl-verification` can derive test intent, assertions, and coverage targets directly from the document
 
-Decision rule: pipeline the datapath, multi-cycle the control path. Never pipeline a control FSM unless it runs at a very high rate.
+## Handling Missing Information
 
-For every pipelined datapath, explicitly define each stage with:
-- Stage name or index
-- Register boundary at the stage input/output
-- Combinational work performed in that stage
-- Valid/ready or data-availability behavior at that stage
-- Added latency relative to input acceptance
+Ask the user only when the missing information changes the design boundary or invalidates a key contract.
 
-### PPA Techniques
+Treat missing information as boundary-changing when any of these would become different:
+- The current object would switch mode between `architecture mode` and `module-design mode`
+- A child block would merge, split, or move between protocol/config, core control, and datapath/storage layers
+- An interface contract would change in ordering, backpressure, retry, flush, or ownership semantics
+- A timing plan would change from single-stage to pipelined, or from direct flow to buffered flow
 
-When constraints demand it, document only the techniques actually used:
-- **Power**: module-level clock gating, operand isolation
-- **Area**: resource sharing, time-division multiplexing, serialized processing
-- **Performance**: deeper pipelining, buffering, wider parallelism
+Must ask if missing and architecture would change:
+- Main protocol or handshake style
+- Throughput or latency contract
+- Whether the current object is still decomposing or already implementable
+- Ordering, flush, retry, or error semantics that affect partitioning
 
-For each technique, record the driving constraint, the tradeoff, and the expected benefit.
+Usually inherit or record as assumptions instead of inventing policy:
+- Reset topology defined by the parent or project
+- Test modes and DFT hooks defined by the platform
+- Physical or power-domain assumptions supplied by integration
 
-### Backend Awareness
+If an inherited dependency is unknown, record it under assumptions or open questions. Do not silently pick a default that narrows the architecture.
 
-Design with implementation reality in mind. The target process shapes architecture decisions.
+## Output Delivery
 
-Cover only the backend-sensitive items that affect architecture:
-- Likely critical path or timing hot spot
-- Preferred register cut point or mitigation
-- High-fanout or clock/reset distribution concerns
-- Hard macro or physical partition constraints, if any
-- FPGA prototype adaptation, if the design must also map to FPGA
-
-Explicitly call out:
-- The likely critical path or timing hot spot
-- Why it is timing-sensitive
-- The preferred register cut point or architectural mitigation
-
-### Clock Domain Partitioning
-
-Identify every clock domain boundary:
-- List all clock inputs and their expected frequencies
-- Identify every signal that crosses a domain boundary
-- For each crossing, choose a CDC strategy:
-  - **Single-bit control**: 2-stage synchronizer
-  - **Multi-bit data with flow control**: async FIFO or handshake CDC
-  - **Multi-bit data with continuous flow**: Gray code counter (depth must be power of 2)
-  - **Pulse across domains**: pulse synchronizer (toggle-based, req/ack)
-
-Document every CDC crossing with: source domain, destination domain, signal width, CDC method, and expected latency.
-
-### Reset Strategy
-
-Define reset behavior for the entire module:
-- **Reset type**: synchronous vs asynchronous. State the choice and why.
-- **Reset domains**: shared reset or independent sub-module resets.
-- **Reset state**: defined state of every output after reset. Unspecified reset states cause integration bugs.
-
-### Risk Assessment
-
-For each design decision, state the risk and the fallback:
-
-| Risk | Likelihood | Impact | Fallback |
-|------|-----------|--------|----------|
-| (example) Custom FIFO fails timing at target frequency | Medium | High | Replace with pipelined version or reduce frequency requirement |
-
-A design without stated risks is a design that will surprise during implementation.
-
-### DFX Planning
-
-Plan DFX features from two sources:
-- **Necessity-driven**: observability or controllability required by the module type
-- **Weakness-driven**: debug hooks needed to reduce a specific risk
-
-For each DFX feature, document:
-- The feature
-- Whether it is necessity-driven or weakness-driven
-- The design concern it addresses
-- How it is exposed: status bit, output port, counter, interrupt, or readback field
-
-## Step 4: Output Requirements
-
-Produce the design document **strictly following the template** in `references/design_doc_template.md`. Use its section structure exactly — do not add, remove, or reorder top-level sections. If a section does not apply, write "Not applicable because [reason]" rather than omitting it.
-
-The template contains three parts:
-1. **Part 1**: Annotated blank template — use this structure
-2. **Part 2**: Complete example (AXI Packet Buffer) — reference for depth and style
-3. **Part 3**: Standard format reference — use these table formats exactly
-
-### Key Points by Template Section
-
-Use the template structure exactly. The main non-obvious requirements are:
-- `§1`: include open questions, pending confirmations, and architecture-driving assumptions
-- `§2`: use the final refined sub-module boundaries from Steps 2-3
-- `§3.5`: for pipelined datapaths, include a stage table before the cycle-by-cycle timing
-- `§3.9`: identify timing hot spots and preferred cut points or mitigations
-- `§4`: mark implementation details as deferred to `rtl-impl`
-- `§5-§6`: quantify tradeoffs and risks; link DFX to risks where applicable
-
-Use hardware semantics throughout. Do not use software pseudocode.
-
-### Output Delivery
-
-Deliver the design document as inline markdown in the current response by default. Only write to a file if:
+Deliver inline markdown by default. Write to a file only if:
 - The user explicitly asks for a file, or
-- The project has an established `docs/` directory and file naming convention
+- The project already has an established docs location and naming scheme
 
-When writing to a file, name it based on the top-level module name, following the project's existing naming conventions if visible.
-
-After completing the document, inform the user that the design document is ready and can be used as input for the `rtl-impl` skill (implementation) or the `rtl-verification` skill (verification planning).
+When writing a module design document, reference the parent architecture document if available.
 
 ## Self-Check Before Delivery
 
-Before presenting the design document, verify:
-- Requirements, open questions, and assumptions are explicit in `§1`
-- Final sub-module specs are complete in `§2`
-- Top-level interfaces, parameters, FSMs, timing, CDC, and reset are complete in `§3`
-- Pipelined datapaths include a stage table in `§3.5`
-- Backend awareness identifies timing hot spots and mitigations in `§3.9`
-- DFX features trace to a specific necessity or weakness in `§3.10`
-- Trade-offs are quantified in `§5`
-- Risks are explicit and connected to mitigations or DFX in `§6`
-- The document uses hardware semantics rather than software pseudocode
+Verify:
+- The selected mode matches the maturity of the current object
+- Architecture documents expand the tree as far as justified and mark node status clearly
+- Module design documents only target objects that are already implementation-ready
+- Layering follows `protocol/config`, `core control`, `datapath/storage`, with `ingress/schedule/egress` used as a supporting view
+- Interface contracts and inherited assumptions are explicit
+- Reset, test, and integration dependencies are recorded instead of guessed
+- No specific CBB names or instantiation choices appear in the design output
+- Verification hooks, invariants, and edge cases are explicit enough for `rtl-verification`
 
 If a check fails:
-- Missing content → go back and fill it in
-- Inconsistency (e.g., diagram vs table) → resolve by updating both
-- Truly not applicable → write "Not applicable because [reason]"
+- Wrong mode or unstable interfaces: stop and move the object back to `architecture mode`
+- Missing budget split or timing rationale: add a provisional allocation and say what assumption drives it
+- Missing FSM, pipeline, or interface detail in a module document: expand the relevant section before delivery
+- Guessed reset/test/clock semantics: replace them with inherited assumptions or explicit open questions
+- Weak verification handoff: add a structured summary of invariants, corner cases, illegal cases, observability hooks, and risk focus items
