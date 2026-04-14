@@ -24,6 +24,7 @@ Use `references/patterns.md` only for coding patterns and instantiation examples
 - If nearby RTL already establishes naming, reset, or coding conventions, match them.
 - If project rule files exist, they override generic defaults in this skill.
 - If DFT-visible behavior, timing exceptions, or integration constraints affect the RTL structure, treat them as implementation inputs rather than post-coding cleanup.
+- Asynchronous reset branches (`always @(posedge clk or negedge rst_n)`) must only assign constant values. Do not use variable signals (e.g. input ports, registers, parameter-dependent expressions evaluated as non-constant) in async reset assignments. If a register needs a non-constant initial value (such as `phase_init`), load it in the synchronous branch on the first clock after reset release, not in the async reset branch. This ensures deterministic reset behavior and avoids synthesis mismatches.
 
 ## Default Flow
 
