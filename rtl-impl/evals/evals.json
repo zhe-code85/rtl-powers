@@ -1,0 +1,75 @@
+{
+  "skill_name": "rtl-impl",
+  "evals": [
+    {
+      "id": 1,
+      "name": "impl-from-module-design-with-direct-reuse",
+      "prompt": "父级已经有 `rtl-design` 的 module-design 文档。现在要实现 `uart_tx_ctrl`，接口和职责已经冻结。项目要求默认写 Verilog，注释语言请先向用户确认。仓库里已有明确的 `baud_gen` 和 `tx_shift_datapath` 相关复用清单，其中 `baud_tick_gen` 可以直接复用。请执行 rtl-impl。",
+      "expected_output": "先做 implementation readiness 检查，确认注释语言；然后执行 CBB/IP reuse gate，识别 `baud_tick_gen` 为 direct reuse；最后以可综合 Verilog RTL 为主要交付，并附带轻量 implementation trace 和 verification handoff。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "impl-design-doc-missing-local-details",
+      "prompt": "我们有 `rtl-design` 文档要实现 `packet_filter`，但文档没有说明 reset 是同步还是异步，也没有冻结 flush 语义。请直接把 RTL 写出来。",
+      "expected_output": "不应直接编码。应该先指出设计输入还没达到 implementation readiness，向用户确认 reset 语义和 flush 行为；如果这些缺口会改变实现边界或行为，也可以建议回到 rtl-design。",
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "impl-no-design-doc-iterative-confirmation",
+      "prompt": "请帮我实现一个 `simple_timer` 模块：可配置周期，到点拉高 irq 一个周期，有 enable 和 clear。现在没有设计文档，你直接写 RTL 就行。",
+      "expected_output": "不应因为缺少 rtl-design 文档而直接拒绝；应该通过和用户迭代确认实现必需信息，例如接口位宽、reset 语义、时钟域、clear 优先级、注释语言等，在信息足够后再进入 Verilog RTL 实现。",
+      "files": []
+    },
+    {
+      "id": 4,
+      "name": "impl-reuse-required-no-catalog",
+      "prompt": "实现 `async_fifo_adapter`。用户明确要求优先使用现有 CBB/IP，但当前仓库里没有任何 catalog、IP list 或 wrapper 文档。请先把代码写出来，后面再说。",
+      "expected_output": "必须执行 CBB/IP reuse gate 并停下来，说明仓库内没有明确的 CBB/IP 清单，要求用户提供列表或 catalog。不能猜测可复用对象，更不能绕过“优先使用”的要求直接自研。",
+      "files": []
+    },
+    {
+      "id": 5,
+      "name": "impl-reuse-optional-found-candidates",
+      "prompt": "请实现一个带 almost-full 的 sync_fifo。用户没有强制要求复用 CBB/IP。仓库里有明确的 FIFO 资产清单，列出了 `fifo_sync_std` 和 `fifo_sync_fwft` 两类复用件。",
+      "expected_output": "应该主动检查仓库内已有的复用清单，并把 `fifo_sync_std` 或 `fifo_sync_fwft` 作为候选向用户或实现摘要说明；如果选择 custom RTL，也要给出为什么不复用的理由，并在实现 trace 中记录。",
+      "files": []
+    },
+    {
+      "id": 6,
+      "name": "impl-target-not-ready-return-to-design",
+      "prompt": "请实现 `dma_read_engine`。现在只知道它要负责 AXI 读请求、outstanding tracking、reorder、错误上报和寄存器配置，但它内部还没决定是拆成几个子块，也没冻结内部接口。",
+      "expected_output": "应该识别这不是稳定的 implementation target，而是仍需继续分解的架构对象；不应直接进入 RTL，而应建议回到 rtl-design 做 architecture mode 或进一步 module-design。",
+      "files": []
+    },
+    {
+      "id": 7,
+      "name": "impl-parameterized-module-boundary-check",
+      "prompt": "请实现一个参数化 `packet_counter`，参数包括 `COUNTER_WIDTH` 和 `SATURATE_EN`。用户只说要能计包，但没有说明参数有效范围、溢出行为、clear 优先级，也没说注释用中文还是英文。",
+      "expected_output": "应该进入 implementation readiness gate，补问参数有效范围、溢出/饱和语义、clear 与计数更新优先级、注释语言等实现必需信息；在这些参数化行为冻结前，不应直接写 RTL。",
+      "files": []
+    },
+    {
+      "id": 8,
+      "name": "impl-cdc-prefers-documented-reuse",
+      "prompt": "请实现一个跨时钟 pulse event bridge。仓库里已经有明确的 CDC 清单，其中 `cdc_pulse_sync` 被批准可复用。用户要求优先使用现有 CBB/IP。",
+      "expected_output": "应该执行 CBB/IP reuse gate，识别 `cdc_pulse_sync` 是文档化的 direct reuse 候选，而不是内联同步触发器；同时在实现摘要或 trace 里记录 CDC 复用决策和相关时钟/复位假设。",
+      "files": []
+    },
+    {
+      "id": 9,
+      "name": "impl-wrapper-reuse-decision",
+      "prompt": "请实现一个 `axi_stream_to_fifo_adapter`。仓库里有明确的 `fifo_sync_std` 资产，但它的接口不是 AXI-Stream。用户要求优先使用现有 CBB/IP，并接受必要的外围适配逻辑。",
+      "expected_output": "不应把 `fifo_sync_std` 当作 direct reuse，也不应直接放弃复用写 custom FIFO；应该选择 `reuse with wrapper`，说明 wrapper 负责 AXI-Stream 握手适配、状态映射或位宽整理，并在 implementation trace 中记录该决策。",
+      "files": []
+    },
+    {
+      "id": 10,
+      "name": "impl-user-asks-for-systemverilog-rtl",
+      "prompt": "请直接用 `SystemVerilog` 帮我实现一个 `priority_mux`，我只接受 `always_comb` 和 `logic` 写法。这个任务只是 RTL 实现，不涉及验证。",
+      "expected_output": "不应直接按 `SystemVerilog` 语法实现。应该明确说明 `rtl-impl` 的标准交付是可综合 `Verilog` RTL；如果用户坚持 `SystemVerilog` 实现语法，应停下来澄清或请求调整要求，而不是静默超出技能边界。",
+      "files": []
+    }
+  ]
+}

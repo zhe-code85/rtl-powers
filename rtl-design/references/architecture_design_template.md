@@ -10,16 +10,23 @@ Use this template in `architecture mode`.
 ### 1.2 Functional Scope
 <!-- State what this object must do and what is explicitly out of scope. -->
 
-### 1.3 External Interfaces And Contracts
+### 1.3 Feature Summary
+<!-- Table: Feature | Source | Status | Current Owner | Design Impact
+     Source is one of: user requirement, parent architecture, project constraint.
+     Status is one of: required, optional, deferred, not supported, TBD.
+     Current Owner identifies whether the feature is owned by this object, a child block, the parent system, or is still unassigned.
+     Design Impact should name the main affected area such as layering, interface contract, storage, timing, buffering, error handling, or verification. -->
+
+### 1.4 External Interfaces And Contracts
 <!-- Table: Interface | Protocol | Direction | Key Signals | Throughput/Latency Contract | Notes -->
 
-### 1.4 Non-Functional Constraints
+### 1.5 Non-Functional Constraints
 <!-- Frequency, area, power, timing margin, buffering limits, ordering or QoS constraints. -->
 
-### 1.5 Inherited Dependencies And Assumptions
+### 1.6 Inherited Dependencies And Assumptions
 <!-- Clocking, reset, test modes, power-domain assumptions, macro boundaries, or integration constraints inherited from the project or parent block. -->
 
-### 1.6 Open Questions
+### 1.7 Open Questions
 <!-- Unknowns that could change decomposition or interface contracts. -->
 
 ## 2. Layered Architecture
@@ -49,6 +56,10 @@ Use this template in `architecture mode`.
 ### 3.4 Budget Allocation
 <!-- Table: Block | Area Budget Share | Timing Budget/Target | Latency Budget | Buffering Budget | Allocation Rationale
      Use provisional numbers or relative weights if exact figures are not yet frozen. -->
+
+### 3.5 Domain-Boundary Summary
+<!-- Table: Boundary | Type (clock/reset/power/test) | Source Side | Destination Side | Architectural Impact | Status
+     Include suspected boundaries as TBD when they may force wrappers, buffering, isolation, retention handling, or ownership splits. -->
 
 ## 4. Integration-Critical Design Decisions
 

@@ -1,4 +1,7 @@
 interface:
   display_name: "RTL Design"
-  short_description: "Architecture-first ASIC RTL design docs"
-  default_prompt: "Use $rtl-design to decide whether this object needs architecture mode or module-design mode, then produce the corresponding ASIC handoff document."
+  short_description: "Architecture-first ASIC subsystem/module docs"
+  default_prompt: "Use $rtl-design to decide whether this RTL task needs architecture mode or module-design mode, then produce the corresponding ASIC handoff document."
+
+policy:
+  allow_implicit_invocation: true

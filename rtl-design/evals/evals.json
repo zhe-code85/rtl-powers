@@ -28,6 +28,20 @@
       "prompt": "父级架构文档已经确定：`uart_subsystem` 被拆成 `apb_cfg_if`、`tx_ctrl`、`baud_gen`、`tx_shift_datapath` 四个子块，其中 `tx_ctrl` 已标记为 ready for module-design。现在请对 `tx_ctrl` 做模块级详细设计。\n\n约束：\n- 它负责发送启动/忙闲控制、与 `baud_gen` 协作推进位发送、处理 parity enable 和 stop-bit 选择\n- APB 协议细节留在 `apb_cfg_if`\n- 串行移位和数据保持留在 `tx_shift_datapath`\n- 系统时钟 50MHz\n- 需要 idle/busy 可见性和错误输入保护\n\n请用 module-design mode 产出，并保持与父级分工一致。",
       "expected_output": "一份 module-design mode 文档，重点包括：\n1. 对父级架构的引用和职责边界\n2. 不把 APB 适配或移位 datapath 重新并入 `tx_ctrl`\n3. 清晰的控制状态机、接口契约、角落场景和 debug hooks\n4. 与 `baud_gen` 和 `tx_shift_datapath` 的协作规则\n5. 可直接指导 RTL 实现和验证的详细程度",
       "files": []
+    },
+    {
+      "id": 5,
+      "name": "mode-inference-colloquial-dma",
+      "prompt": "帮我设计一个 DMA engine。它要从内存读数据再推给下游流接口，现在我还没想清楚内部应该拆成哪几个块，也不确定哪些块先做详细设计。目标频率 900MHz，7nm，支持 backpressure。",
+      "expected_output": "技能应自行判断当前更适合 architecture mode，而不是直接进入 leaf module 详细设计。输出应体现：\n1. 对口语化需求的正确触发\n2. architecture mode 的分层、模块树和状态标注\n3. 不把对象误判成已可直接实现的单一模块",
+      "files": []
+    },
+    {
+      "id": 6,
+      "name": "missing-info-boundary-change",
+      "prompt": "请帮我做一个流式处理 block 的设计文档。要求是有输入输出接口、需要高吞吐、可能有 flush，也可能跨两个时钟域，但这些我还没定。你先设计吧。",
+      "expected_output": "技能不应直接拍板详细设计。它应把未定的协议/flush/CDC 信息识别为边界变化风险，并通过 open questions 或追问体现：\n1. 未定 flush 语义会影响接口契约和模块划分\n2. 未定多时钟域会影响 CDC 边界和结构分解\n3. 当前对象更适合 architecture mode 或先澄清关键信息",
+      "files": []
     }
   ]
 }

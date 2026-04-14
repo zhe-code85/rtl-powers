@@ -1,6 +1,19 @@
-# PPA-Aware Verilog Coding Patterns
+# PPA-Aware RTL Coding Patterns
+
+These are reference patterns, not the main workflow. The main workflow lives in `../SKILL.md`.
+
+Use these examples as `Verilog`-style implementation templates for `rtl-impl`. If project helper macros or utility functions exist, adapt the examples to match those local `Verilog` conventions without switching the RTL itself to `SystemVerilog`.
 
 Annotated examples organized by category. Each pattern includes PPA rationale explaining why the pattern helps timing, area, or power. Use these as starting templates when implementing custom RTL.
+
+## Quick Index
+
+- Section 1: Datapath patterns
+- Section 2: Control patterns
+- Section 3: Storage patterns
+- Section 4: Interface patterns
+- Section 5: Arithmetic patterns
+- Section 6: CBB instantiation and wrapper patterns
 
 ---
 
@@ -11,10 +24,11 @@ Annotated examples organized by category. Each pattern includes PPA rationale ex
 Insert at natural pipeline boundaries to support backpressure. The `valid`/`ready` handshake allows downstream modules to stall without complex freeze logic propagating backward through the entire pipeline.
 
 ```verilog
-// Pipeline stage with valid-ready handshaking.
-// skid_reg captures data when downstream is not ready, preventing data loss.
-// PPA: clean timing boundary; skid register costs 1 extra register per stage
-//      but avoids the need to stall the entire upstream pipeline.
+// Pipeline stage with one-entry skid buffering.
+// When the output register is blocked, one extra beat can be parked in skid_data.
+// If the blocked beat is consumed and a new beat arrives in the same cycle,
+// the design refills skid_data so the handshake stays lossless.
+// PPA: clean timing boundary; one extra register slice avoids a long stall path.
 
 module pipeline_stage #(
     parameter WIDTH = 32
@@ -33,46 +47,47 @@ module pipeline_stage #(
     reg [WIDTH-1:0] skid_data;
     reg             skid_valid;
 
-    // Output register
+    // Output register visible at the downstream interface
     reg [WIDTH-1:0] out_data;
     reg             out_valid;
 
-    // Transfer occurs when data is valid and downstream accepts it
-    wire din_fire  = din_valid  & din_ready;
-    wire dout_fire = dout_valid & dout_ready;
+    wire out_fire = out_valid & dout_ready;
 
-    // Upstream can accept when skid is empty or skid is being consumed
-    assign din_ready = ~skid_valid | dout_fire;
+    // Upstream can send whenever the skid entry is free.
+    assign din_ready = ~skid_valid;
 
-    always_ff @(posedge clk or negedge rst_n) begin
+    always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             skid_valid <= 1'b0;
             out_valid  <= 1'b0;
             out_data   <= {WIDTH{1'b0}};
             skid_data  <= {WIDTH{1'b0}};
         end else begin
-            // Skid register management
-            if (dout_fire) begin
-                skid_valid <= 1'b0;
-            end else if (din_fire && !dout_ready && din_valid) begin
-                skid_data  <= din;
-                skid_valid <= 1'b1;
-            end
-
-            // Output register: load from skid or direct input
-            if (dout_fire) begin
+            // Consume the current output beat first. Refill from skid or input.
+            if (out_fire) begin
                 if (skid_valid) begin
                     out_data  <= skid_data;
                     out_valid <= 1'b1;
+
+                    // If a new beat arrives while draining skid, keep skid occupied.
+                    if (din_valid) begin
+                        skid_data  <= din;
+                        skid_valid <= 1'b1;
+                    end else begin
+                        skid_valid <= 1'b0;
+                    end
                 end else if (din_valid) begin
                     out_data  <= din;
                     out_valid <= 1'b1;
                 end else begin
                     out_valid <= 1'b0;
                 end
-            end else if (din_fire && dout_ready) begin
+            end else if (!out_valid && din_valid) begin
                 out_data  <= din;
                 out_valid <= 1'b1;
+            end else if (out_valid && !dout_ready && din_valid && !skid_valid) begin
+                skid_data  <= din;
+                skid_valid <= 1'b1;
             end
         end
     end
@@ -102,6 +117,8 @@ Good: One multiplier shared across time slots.
 // PPA: Saves one DSP block. Control logic is minimal (one mux + toggle).
 //      Throughput halved per stream but area halved — acceptable when
 //      full throughput per stream is not required.
+// The first product is parked until the second product arrives, then the pair
+// is published together with result_valid.
 
 module shared_mult #(
     parameter WIDTH = 16
@@ -118,27 +135,27 @@ module shared_mult #(
     output reg                result_valid
 );
 
-    reg sel;  // 0 = compute A, 1 = compute B
-    reg [2*WIDTH-1:0] mult_result;
+    reg sel;  // 0 = capture A, 1 = capture B and publish the pair
+    reg [2*WIDTH-1:0] a_product_hold;
 
-    always_ff @(posedge clk or negedge rst_n) begin
+    always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            sel           <= 1'b0;
-            result_valid  <= 1'b0;
-            result_a      <= {(2*WIDTH){1'b0}};
-            result_b      <= {(2*WIDTH){1'b0}};
-            mult_result   <= {(2*WIDTH){1'b0}};
+            sel            <= 1'b0;
+            result_valid   <= 1'b0;
+            result_a       <= {(2*WIDTH){1'b0}};
+            result_b       <= {(2*WIDTH){1'b0}};
+            a_product_hold <= {(2*WIDTH){1'b0}};
         end else if (data_valid) begin
             // Single multiplier, time-shared
             if (!sel) begin
-                mult_result <= data_a * coeff_a;
-                result_a    <= mult_result;  // registered output
+                a_product_hold <= data_a * coeff_a;
+                result_valid   <= 1'b0;
             end else begin
-                mult_result <= data_b * coeff_b;
-                result_b    <= mult_result;
+                result_a     <= a_product_hold;
+                result_b     <= data_b * coeff_b;
+                result_valid <= 1'b1;
             end
             sel <= ~sel;
-            result_valid <= sel;  // assert when pair is complete
         end else begin
             result_valid <= 1'b0;
         end
@@ -201,7 +218,7 @@ module onehot_fsm (
     reg [3:0] state, next_state;
 
     // State register
-    always_ff @(posedge clk or negedge rst_n) begin
+    always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             state <= IDLE;
         end else begin
@@ -210,7 +227,7 @@ module onehot_fsm (
     end
 
     // Next-state logic — one-hot means single-bit checks
-    always_comb begin
+    always @(*) begin
         next_state = state;  // default: hold current state
         case (1'b1)  // synthesis pragma parallel_case
             state[0]:  // IDLE
@@ -227,7 +244,7 @@ module onehot_fsm (
     end
 
     // Output logic — decoded from individual state bits
-    always_comb begin
+    always @(*) begin
         busy    = state[1] | state[2];  // LOAD or PROCESS
         fsm_out = state;
     end
@@ -254,14 +271,14 @@ module binary_fsm (
 
     reg [1:0] state, next_state;
 
-    always_ff @(posedge clk or negedge rst_n) begin
+    always @(posedge clk or negedge rst_n) begin
         if (!rst_n)
             state <= IDLE;
         else
             state <= next_state;
     end
 
-    always_comb begin
+    always @(*) begin
         next_state = state;
         case (state)
             IDLE:   if (req)  next_state = WAIT;
@@ -271,7 +288,7 @@ module binary_fsm (
         endcase
     end
 
-    always_comb begin
+    always @(*) begin
         grant = (state == ACTIVE);
     end
 
@@ -283,12 +300,12 @@ endmodule
 Every FSM must recover gracefully from unexpected states (e.g., radiation-induced bit flip, reset glitch). The pattern below forces any undefined state back to IDLE within one cycle.
 
 ```verilog
-// Recovery wrapper: use inside next-state always_comb block.
+// Recovery wrapper: use inside next-state combinational block.
 // If state register holds a value not in the defined localparam set,
 // immediately transition to IDLE. This is NOT the same as the default
 // case in a case statement — this catches actual register corruption.
 
-always_comb begin
+always @(*) begin
     next_state = state;
     case (state)
         IDLE:    if (go)   next_state = RUN;
@@ -322,11 +339,11 @@ module reg_array #(
 );
 
     reg [WIDTH-1:0] mem [0:DEPTH-1];
+    integer i;
 
     // Write port — synchronous write
-    always_ff @(posedge clk or negedge rst_n) begin
+    always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            integer i;
             for (i = 0; i < DEPTH; i = i + 1) begin
                 mem[i] <= {WIDTH{1'b0}};
             end
@@ -366,7 +383,7 @@ module ram_simple_dual #(
     reg [WIDTH-1:0] mem [0:DEPTH-1];
 
     // Write: synchronous
-    always_ff @(posedge clk) begin
+    always @(posedge clk) begin
         if (wen) begin
             mem[waddr] <= wdata;
         end
@@ -375,7 +392,7 @@ module ram_simple_dual #(
     // Read: synchronous — required for BRAM inference.
     // PPA: 1-cycle read latency, but maps to dedicated BRAM instead of
     //      consuming LUTs and flip-flops. Area savings scale with depth.
-    always_ff @(posedge clk) begin
+    always @(posedge clk) begin
         if (ren) begin
             rdata <= mem[raddr];
         end
@@ -412,7 +429,7 @@ module clock_gated_regs #(
     reg [WIDTH-1:0] regs [0:DEPTH-1];
 
     integer i;
-    always_ff @(posedge clk or negedge rst_n) begin
+    always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             for (i = 0; i < DEPTH; i = i + 1)
                 regs[i] <= {WIDTH{1'b0}};
@@ -467,7 +484,7 @@ module handshake_consumer #(
     // Simple consumer: always ready to accept when internal buffer is empty
     wire transfer = data_in_valid & data_in_ready;
 
-    always_ff @(posedge clk or negedge rst_n) begin
+    always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             data_in_ready  <= 1'b1;  // ready by default
             payload        <= {WIDTH{1'b0}};
@@ -521,7 +538,7 @@ module axi_lite_sub #(
     reg aw_ready, w_ready, b_valid;
     reg [ADDR_WIDTH-1:0] wr_addr;
 
-    always_ff @(posedge clk or negedge rst_n) begin
+    always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             aw_ready <= 1'b1;
             w_ready  <= 1'b1;
@@ -556,7 +573,7 @@ module axi_lite_sub #(
     reg ar_ready, r_valid_reg;
     reg [DATA_WIDTH-1:0] rd_data;
 
-    always_ff @(posedge clk or negedge rst_n) begin
+    always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             ar_ready    <= 1'b1;
             r_valid_reg <= 1'b0;
@@ -646,7 +663,7 @@ module dsp_mac #(
 
     reg signed [P_WIDTH-1:0] accum;
 
-    always_ff @(posedge clk or negedge rst_n) begin
+    always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             accum <= {P_WIDTH{1'b0}};
         end else if (clr) begin
@@ -693,7 +710,7 @@ module iter_divider #(
     reg [$clog2(ITER+1)-1:0] count;
     reg busy;
 
-    always_ff @(posedge clk or negedge rst_n) begin
+    always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             quotient  <= {WIDTH{1'b0}};
             remainder <= {WIDTH{1'b0}};
@@ -758,9 +775,9 @@ module saturate #(
     localparam signed [IN_WIDTH-1:0] NEG_MIN = -(1 <<< (OUT_WIDTH - 1));
 
     // Clamp logic: compare then select
-    assign dout = (din > POS_MAX) ? signed'(POS_MAX[OUT_WIDTH-1:0]) :
-                  (din < NEG_MIN) ? signed'(NEG_MIN[OUT_WIDTH-1:0]) :
-                  signed'(din[OUT_WIDTH-1:0]);
+    assign dout = (din > POS_MAX) ? POS_MAX[OUT_WIDTH-1:0] :
+                  (din < NEG_MIN) ? NEG_MIN[OUT_WIDTH-1:0] :
+                  din[OUT_WIDTH-1:0];
 
 endmodule
 ```
@@ -863,7 +880,7 @@ module fifo_32to64 #(
 
     assign fifo_rd = ~fifo_empty & ~pack_valid;
 
-    always_ff @(posedge clk or negedge rst_n) begin
+    always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             pack_reg   <= 64'b0;
             pack_valid <= 1'b0;

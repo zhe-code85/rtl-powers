@@ -1,6 +1,6 @@
 ---
 name: rtl-design
-description: Use when a digital design engineer needs architecture or detailed design documentation for an assigned ASIC subsystem, block, or RTL module before implementation. Triggers on subsystem layering, recursive module decomposition, protocol/config/control/datapath partitioning, interface contracts, microarchitecture planning, timing or pipeline decisions, CDC/reset/test assumptions, or when rtl-impl or rtl-verification needs a design handoff document.
+description: Use when a digital design engineer needs architecture or detailed design documentation for an assigned ASIC subsystem, block, or RTL module before implementation. Triggers on subsystem layering, recursive module decomposition, protocol/config/control/datapath partitioning, interface contracts, microarchitecture planning, timing or pipeline decisions, CDC/reset/test assumptions, or when rtl-impl or rtl-verification needs a design handoff document. Also use when the user says things like "design this DMA engine", "split this block/module", "refine this subsystem", "give me an architecture doc", "continue from top-level to module design", or similar colloquial requests to design or decompose RTL hardware.
 ---
 
 # RTL Design For ASIC Handoff
@@ -45,10 +45,12 @@ Use this mode for the current design layer when the object still needs structura
 
 Extract and state:
 - What this object is responsible for in the parent system
+- The feature list derived from user requirements, parent constraints, and current-layer ownership
 - External interfaces and protocol contracts
 - Throughput, latency, buffering, ordering, and QoS requirements
 - Area, frequency, power, and timing-margin budgets
 - Dependencies inherited from the platform: clocking, reset, test mode behavior, power-domain assumptions, macro boundaries, or integration restrictions
+- Known or suspected clock-domain, reset-domain, and power-domain boundaries that could affect partitioning
 - Open questions that could change the partitioning
 
 ### Step 2: Build The Layer Skeleton
@@ -84,6 +86,8 @@ Use these rules to keep the decomposition professional and consistent:
 - Split out storage management when occupancy tracking, hazard handling, replay, buffering, or flow-control semantics dominate the design.
 - Do not mix unrelated ingress and egress protocol details into a single control block unless the object is very small and the coupling is essential.
 - Keep error, flush, retry, and recovery behavior explicit. They may stay in the core control layer, but they must not be hidden inside datapath prose.
+- Separate blocks across power-domain boundaries when isolation, retention, or power-state sequencing would otherwise become implicit side effects inside a functional block.
+- Make CDC boundaries explicit at architecture level. If a suspected crossing changes buffering, control ownership, or integration structure, give it its own boundary or wrapper rather than burying it in prose.
 - Prefer boundaries that improve implementation and verification clarity over boundaries chosen only for aesthetic symmetry.
 
 Allocate budgets while partitioning rather than leaving them to the end:
@@ -97,11 +101,13 @@ Allocate budgets while partitioning rather than leaving them to the end:
 Use `references/architecture_design_template.md`.
 
 The architecture document must include:
+- Feature summary with source, status, owner, and design impact
 - Layer map
 - Flow map
 - Recursive module tree with status per node
 - Partition rationale for every major child block
 - External and internal interface contracts
+- Domain-boundary summary covering clock/reset/power boundaries that matter to decomposition
 - Budget allocation and integration-critical boundaries
 - Verification hooks and architecture-level invariants
 - Clear next-step handoff: which nodes are ready for detailed design next
@@ -170,6 +176,7 @@ Treat missing information as boundary-changing when any of these would become di
 - A child block would merge, split, or move between protocol/config, core control, and datapath/storage layers
 - An interface contract would change in ordering, backpressure, retry, flush, or ownership semantics
 - A timing plan would change from single-stage to pipelined, or from direct flow to buffered flow
+- A suspected CDC, reset-domain, or power-domain boundary would require a new wrapper, queue, synchronizer boundary, isolation point, or ownership split
 
 Must ask if missing and architecture would change:
 - Main protocol or handshake style
