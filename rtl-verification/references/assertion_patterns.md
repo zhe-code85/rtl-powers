@@ -74,6 +74,24 @@ endproperty
 assert_full_correct: assert property (p_full_means_ptr_match);
 ```
 
+### Gray Code Pointer Check
+
+```systemverilog
+// Assert: a Gray-coded pointer changes by at most one bit at a time.
+// Rationale: catch CDC FIFO pointer corruption or accidental binary updates.
+
+property p_gray_pointer_changes_one_bit(ptr);
+    @(posedge clk) disable iff (!rst_n)
+    $onehot0(ptr ^ $past(ptr));
+endproperty
+
+assert_wr_gray_ptr: assert property (p_gray_pointer_changes_one_bit(wr_ptr_gray))
+    else $error("Write Gray pointer changed by more than one bit");
+
+assert_rd_gray_ptr: assert property (p_gray_pointer_changes_one_bit(rd_ptr_gray))
+    else $error("Read Gray pointer changed by more than one bit");
+```
+
 ### AXI Protocol Checker (Write Response)
 
 ```systemverilog
@@ -174,6 +192,21 @@ assert_ctrl_reset: assert property (p_reset_value(ctrl_state, CTRL_IDLE))
     else $error("Control state not reset to IDLE");
 ```
 
+### Multi-Clock Request / Acknowledge Check
+
+```systemverilog
+// Assert: a request observed in clk_a eventually produces an acknowledge.
+// Rationale: useful for CDC wrappers and pulse-transfer interfaces.
+
+property p_req_eventually_ack;
+    @(posedge clk_a) disable iff (!rst_n_a)
+    $rose(req_a) |-> ##[1:32] ack_b_sync;
+endproperty
+
+assert_req_eventually_ack: assert property (p_req_eventually_ack)
+    else $error("CDC request was not acknowledged within 32 clk_a cycles");
+```
+
 ---
 
 ## Section 3: Cocotb-Side Checkers
@@ -269,7 +302,67 @@ async def test_transfer_completes(dut):
 
 ---
 
-## Section 4: Anti-Patterns
+## Section 4: Coverage Patterns
+
+### Cover Property For Protocol Modes
+
+```systemverilog
+// Cover both immediate and delayed valid-ready handshakes.
+cover_handshake_immediate: cover property (
+    @(posedge clk) disable iff (!rst_n)
+    valid && ready
+);
+
+cover_handshake_delayed: cover property (
+    @(posedge clk) disable iff (!rst_n)
+    valid && !ready ##[1:8] valid && ready
+);
+```
+
+### Covergroup For Boundary And Timeout States
+
+```systemverilog
+covergroup cg_timeout_and_fill @(posedge clk);
+    cp_fifo_level: coverpoint fifo_level {
+        bins empty = {0};
+        bins near_full = {DEPTH-1};
+        bins full = {DEPTH};
+    }
+
+    cp_timeout: coverpoint timeout_fired {
+        bins no_timeout = {0};
+        bins fired = {1};
+    }
+
+    cross cp_fifo_level, cp_timeout;
+endgroup
+
+cg_timeout_and_fill cov_inst = new();
+```
+
+### Python-Side Coverage Counters
+
+```python
+class CoverageTracker:
+    """Lightweight functional coverage for cocotb flows."""
+
+    def __init__(self):
+        self.hits = {
+            "timeout": 0,
+            "backpressure": 0,
+            "zero_length": 0,
+        }
+
+    def hit(self, name):
+        self.hits[name] += 1
+
+    def require(self, name):
+        assert self.hits[name] > 0, f"Coverage hole: {name} was never exercised"
+```
+
+---
+
+## Section 5: Anti-Patterns
 
 ### Noisy Assertions: Fire Every Cycle
 

@@ -37,7 +37,7 @@ Corresponding Makefile:
 
 ```makefile
 # Makefile
-SIM ?= icarus
+SIM ?= verilator
 TOPLEVEL_LANG = verilog
 VERILOG_SOURCES = $(PWD)/rtl/my_module.v
 MODULE = test_my_module
@@ -312,19 +312,52 @@ class Scoreboard:
         return len(self.expected)
 ```
 
----
-
-## Section 4: Cocotb-bus Usage
-
-For standard bus interfaces (AXI, APB), cocotb-bus provides pre-built drivers with protocol checking.
+### Reference Model Pattern
 
 ```python
-# Requires: pip install cocotb-bus
+class CrcReferenceModel:
+    """Pure Python reference model for deterministic expected values."""
+
+    def __init__(self, polynomial=0x1021, init=0xFFFF):
+        self.polynomial = polynomial
+        self.init = init
+
+    def update(self, data_bytes):
+        crc = self.init
+        for byte in data_bytes:
+            crc ^= (byte & 0xFF) << 8
+            for _ in range(8):
+                if crc & 0x8000:
+                    crc = ((crc << 1) ^ self.polynomial) & 0xFFFF
+                else:
+                    crc = (crc << 1) & 0xFFFF
+        return crc
+
+@cocotb.test()
+async def test_crc_matches_reference_model(dut):
+    """Use a Python reference model when direct checking is error-prone."""
+    model = CrcReferenceModel()
+    payload = [0x12, 0x34, 0x56]
+
+    # ... drive payload into DUT ...
+    expected_crc = model.update(payload)
+    actual_crc = int(dut.crc_out.value)
+    assert actual_crc == expected_crc
+```
+
+---
+
+## Section 4: Bus Extension Usage
+
+For standard bus interfaces such as AXI or APB, a protocol-specific extension library can be cleaner than a hand-written driver.
+
+```python
+# Requires: pip install cocotbext-axi
 from cocotbext.axi import AxiLiteBus, AxiLiteMaster
 
 @cocotb.test()
 async def test_with_cocotb_bus(dut):
-    """Use cocotb-bus AXI-Lite master for cleaner bus driving."""
+    """Use cocotbext-axi AXI-Lite master for cleaner bus driving."""
     clock = Clock(dut.clk, 10, units="ns")
     cocotb.start_soon(clock.start())
     await apply_reset(dut)
@@ -342,8 +375,8 @@ async def test_with_cocotb_bus(dut):
     assert value == 0xDEADBEEF
 ```
 
-When to use cocotb-bus vs lightweight:
-- **cocotb-bus**: Standard bus protocol (AXI, APB, Wishbone), burst support, protocol checking built in
+When to use an extension library vs lightweight:
+- **Extension library**: Standard bus protocol with maintained drivers, helpers, and protocol-aware utilities
 - **Lightweight**: Custom protocols, non-standard interfaces, minimal dependency requirements
 
 ---
@@ -407,11 +440,17 @@ factory.add_option("width", [8, 16, 32])
 factory.generate_tests()
 ```
 
+Parameterized regression strategy:
+- Keep one or two smoke configurations for quick bring-up.
+- Add boundary tuples such as minimum width, minimum depth, and non-power-of-2 cases.
+- Reserve the full cross product for scheduled regression only when runtime is acceptable.
+- Record which tuples are omitted so coverage gaps stay explicit.
+
 ### CI-Friendly Makefile Runner
 
 ```makefile
 # run_regression.mk
-SIM ?= icarus
+SIM ?= verilator
 TOPLEVEL_LANG = verilog
 VERILOG_SOURCES = $(PWD)/rtl/fifo_sync.v
 MODULE = test_fifo_regression
@@ -425,7 +464,7 @@ include $(shell cocotb-config --makefiles)/Makefile.sim
 
 ```bash
 # CI pipeline command
-make -f run_regression.mk SIM=icandrone COCOTB_RESULTS_FILE=results.xml
+make -f run_regression.mk SIM=verilator COCOTB_RESULTS_FILE=results.xml
 ```
 
 ---
@@ -434,16 +473,22 @@ make -f run_regression.mk SIM=icandrone COCOTB_RESULTS_FILE=results.xml
 
 ### Delta Cycles vs Simulation Time
 
-Cocotb triggers fire in delta cycles within a simulation time step. When you `await RisingEdge(clk)`, the coroutine resumes at the delta cycle where clk transitions, NOT at the next simulation time step. Signal reads after `RisingEdge` see values from the previous delta cycle.
+Cocotb triggers fire in delta cycles within a simulation time step. When you `await RisingEdge(clk)`, the coroutine resumes at the delta cycle where clk transitions, NOT at the next simulation time step. Signal reads after `RisingEdge` may still reflect the prior write phase unless you wait for the appropriate scheduling point.
+
+Version note:
+- Cocotb 1.x and 2.x differ in scheduler details around `ReadOnly`, `ReadWrite`, and post-edge sampling.
+- Prefer explicit trigger choices over relying on accidental delta-cycle behavior, especially in mixed-version repositories.
 
 ```python
-# WRONG: read happens in same delta as clock edge — may see old values
+# WRONG: read happens at the edge without a stable sampling point
 await RisingEdge(dut.clk)
 value = int(dut.data.value)  # might be stale
 
-# CORRECT: add one more delta for signals to propagate
+# BETTER: sample in a read-only phase after the clock edge
+from cocotb.triggers import ReadOnly
+
 await RisingEdge(dut.clk)
-await RisingEdge(dut.clk)  # now data is stable
+await ReadOnly()
 value = int(dut.data.value)
 ```
 
@@ -492,17 +537,7 @@ result = int(dut.rd_data.value)
 ### Timeout Watchdog
 
 ```python
-from cocotb.triggers import Timer, First
-
-async def with_timeout(coro, timeout_us=100):
-    """Run coroutine with timeout. Fail test if timeout expires."""
-    result = await First(
-        coro,
-        Timer(timeout_us, units="us")
-    )
-    # If Timer won, the coroutine didn't complete
-    # Check by seeing if result is from the coroutine
-    return result
+from cocotb.triggers import with_timeout
 
 @cocotb.test()
 async def test_no_deadlock(dut):
@@ -517,7 +552,7 @@ async def test_no_deadlock(dut):
             await drive_valid_ready(dut, i)
 
     try:
-        await with_timeout(write_sequence(), timeout_us=50)
+        await with_timeout(write_sequence(), 50, "us")
     except Exception:
         assert False, "DUT appears to deadlock under backpressure"
 ```

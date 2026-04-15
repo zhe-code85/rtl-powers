@@ -10,9 +10,9 @@
     },
     {
       "id": 2,
-      "name": "impl-design-doc-missing-local-details",
-      "prompt": "我们有 `rtl-design` 文档要实现 `packet_filter`，但文档没有说明 reset 是同步还是异步，也没有冻结 flush 语义。请直接把 RTL 写出来。",
-      "expected_output": "不应直接编码。应该先指出设计输入还没达到 implementation readiness，向用户确认 reset 语义和 flush 行为；如果这些缺口会改变实现边界或行为，也可以建议回到 rtl-design。",
+      "name": "impl-readiness-gaps-with-parameterized-behavior",
+      "prompt": "我们有 `rtl-design` 文档要实现一个参数化 `packet_counter`，参数包括 `COUNTER_WIDTH` 和 `SATURATE_EN`。但文档没有说明 reset 是同步还是异步，也没有冻结 flush/clear 语义、参数有效范围、溢出行为和注释语言。请直接把 RTL 写出来。",
+      "expected_output": "不应直接编码。应该先指出设计输入还没达到 implementation readiness，并补问 reset 语义、flush/clear 行为、参数有效范围、溢出/饱和语义、更新优先级和注释语言；如果这些缺口会改变实现边界或行为，也可以建议回到 rtl-design。",
       "files": []
     },
     {
@@ -31,44 +31,37 @@
     },
     {
       "id": 5,
-      "name": "impl-reuse-optional-found-candidates",
-      "prompt": "请实现一个带 almost-full 的 sync_fifo。用户没有强制要求复用 CBB/IP。仓库里有明确的 FIFO 资产清单，列出了 `fifo_sync_std` 和 `fifo_sync_fwft` 两类复用件。",
-      "expected_output": "应该主动检查仓库内已有的复用清单，并把 `fifo_sync_std` 或 `fifo_sync_fwft` 作为候选向用户或实现摘要说明；如果选择 custom RTL，也要给出为什么不复用的理由，并在实现 trace 中记录。",
-      "files": []
-    },
-    {
-      "id": 6,
       "name": "impl-target-not-ready-return-to-design",
       "prompt": "请实现 `dma_read_engine`。现在只知道它要负责 AXI 读请求、outstanding tracking、reorder、错误上报和寄存器配置，但它内部还没决定是拆成几个子块，也没冻结内部接口。",
       "expected_output": "应该识别这不是稳定的 implementation target，而是仍需继续分解的架构对象；不应直接进入 RTL，而应建议回到 rtl-design 做 architecture mode 或进一步 module-design。",
       "files": []
     },
     {
-      "id": 7,
-      "name": "impl-parameterized-module-boundary-check",
-      "prompt": "请实现一个参数化 `packet_counter`，参数包括 `COUNTER_WIDTH` 和 `SATURATE_EN`。用户只说要能计包，但没有说明参数有效范围、溢出行为、clear 优先级，也没说注释用中文还是英文。",
-      "expected_output": "应该进入 implementation readiness gate，补问参数有效范围、溢出/饱和语义、clear 与计数更新优先级、注释语言等实现必需信息；在这些参数化行为冻结前，不应直接写 RTL。",
-      "files": []
-    },
-    {
-      "id": 8,
-      "name": "impl-cdc-prefers-documented-reuse",
-      "prompt": "请实现一个跨时钟 pulse event bridge。仓库里已经有明确的 CDC 清单，其中 `cdc_pulse_sync` 被批准可复用。用户要求优先使用现有 CBB/IP。",
-      "expected_output": "应该执行 CBB/IP reuse gate，识别 `cdc_pulse_sync` 是文档化的 direct reuse 候选，而不是内联同步触发器；同时在实现摘要或 trace 里记录 CDC 复用决策和相关时钟/复位假设。",
-      "files": []
-    },
-    {
-      "id": 9,
+      "id": 6,
       "name": "impl-wrapper-reuse-decision",
       "prompt": "请实现一个 `axi_stream_to_fifo_adapter`。仓库里有明确的 `fifo_sync_std` 资产，但它的接口不是 AXI-Stream。用户要求优先使用现有 CBB/IP，并接受必要的外围适配逻辑。",
       "expected_output": "不应把 `fifo_sync_std` 当作 direct reuse，也不应直接放弃复用写 custom FIFO；应该选择 `reuse with wrapper`，说明 wrapper 负责 AXI-Stream 握手适配、状态映射或位宽整理，并在 implementation trace 中记录该决策。",
       "files": []
     },
     {
-      "id": 10,
+      "id": 7,
       "name": "impl-user-asks-for-systemverilog-rtl",
       "prompt": "请直接用 `SystemVerilog` 帮我实现一个 `priority_mux`，我只接受 `always_comb` 和 `logic` 写法。这个任务只是 RTL 实现，不涉及验证。",
       "expected_output": "不应直接按 `SystemVerilog` 语法实现。应该明确说明 `rtl-impl` 的标准交付是可综合 `Verilog` RTL；如果用户坚持 `SystemVerilog` 实现语法，应停下来澄清或请求调整要求，而不是静默超出技能边界。",
+      "files": []
+    },
+    {
+      "id": 8,
+      "name": "impl-next-value-single-comb-block-per-signal",
+      "prompt": "请按 `rtl-impl` 为一个包含 `state_q`、`count_q`、`valid_q` 三个寄存状态的模块写 next-value 风格 RTL。项目要求使用 `*_comb` 命名。为了省事，把三个 next-value 都写进同一个 `always @(*)` 里统一计算。",
+      "expected_output": "不应接受把多个 `*_comb` 信号写在同一个组合块里的做法。应该遵守 `rtl-rules.md` 的硬规则：每个 next-value 信号各自使用独立的 `always @(*)` 组合块；如果采用 next-value 编码，则 `state_comb`、`count_comb`、`valid_comb` 等都应分别计算，而不是混写在单个组合块中。",
+      "files": []
+    },
+    {
+      "id": 9,
+      "name": "impl-next-value-rule-overrides-user-preference",
+      "prompt": "请实现一个 next-value 风格的 `event_counter`。我明确要求把 `count_comb`、`overflow_comb`、`irq_comb` 三个 next-value 都放进同一个 `always @(*)`，这样我看着更集中。其他都按 `rtl-impl` 来做。",
+      "expected_output": "即使用户显式要求把多个 `*_comb` 信号合并进一个组合块，也不应照做。应该指出这与 `rtl-rules.md` 的强制规则冲突，并坚持采用每个 next-value 信号一个独立 `always @(*)` 组合块的写法；必要时应先澄清或说明无法按该冲突要求实现。",
       "files": []
     }
   ]

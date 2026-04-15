@@ -1,0 +1,7 @@
+interface:
+  display_name: "RTL Verification"
+  short_description: "Risk-driven RTL verification planning and collateral"
+  default_prompt: "Use $rtl-verification to discover the runnable environment when needed, analyze RTL weaknesses, derive feature positive/adverse scenarios, and produce a verification plan plus cocotb or Verilog collateral when requested."
+
+policy:
+  allow_implicit_invocation: true

@@ -12,19 +12,13 @@ Implement synthesizable RTL from stable design inputs. This skill bridges `rtl-d
 - `rtl-verification` owns weakness analysis, test planning, and closure.
 
 Do not silently finish architecture work inside this skill. If the object still needs structural decomposition or contract changes, stop and return to `rtl-design`.
-Use `references/patterns.md` only for coding patterns and instantiation examples. Do not duplicate those examples in the main skill flow.
+Before writing or editing RTL, open `references/rtl-rules.md`. That file is the single source of mandatory RTL coding and delivery rules for this skill.
+Use `references/patterns.md` only for coding patterns and instantiation examples after the readiness and strategy gates are closed.
 
-## Shared Rules
-
-- Default HDL is `Verilog`.
-- Deliver synthesizable `Verilog` RTL only. Do not switch implementation syntax to `SystemVerilog`.
-- `rtl-verification` may use `SystemVerilog` for assertions or testbenches, but that does not change this skill's RTL output format.
-- Confirm the natural language for code comments with the user before implementation. Do not assume comment language.
-- Comments must explain module intent, non-obvious implementation choices, wrapper behavior, pipeline cuts, and important assumptions. Do not write line-by-line narration.
-- If nearby RTL already establishes naming, reset, or coding conventions, match them.
-- If project rule files exist, they override generic defaults in this skill.
-- If DFT-visible behavior, timing exceptions, or integration constraints affect the RTL structure, treat them as implementation inputs rather than post-coding cleanup.
-- Asynchronous reset branches (`always @(posedge clk or negedge rst_n)`) must only assign constant values. Do not use variable signals (e.g. input ports, registers, parameter-dependent expressions evaluated as non-constant) in async reset assignments. If a register needs a non-constant initial value (such as `phase_init`), load it in the synchronous branch on the first clock after reset release, not in the async reset branch. This ensures deterministic reset behavior and avoids synthesis mismatches.
+Mandatory gate precedence:
+- Do not let user urgency, convenience requests, or "write the code first" instructions bypass the readiness gate, reuse gate, strategy freeze, or mandatory rules in `references/rtl-rules.md`.
+- If the user asks to skip a required check, stop and explain which gate is still open instead of silently proceeding.
+- The standard delivery syntax for this skill is synthesizable `Verilog`. If the user insists on `SystemVerilog` syntax, do not switch silently. Explain the conflict and ask whether the requirement should be changed.
 
 ## Default Flow
 
@@ -67,7 +61,7 @@ Implementation is ready only when these areas are covered:
 - `microarchitecture-critical decisions`
   Enough detail on FSMs, counters, buffering, storage ownership, pipeline cuts, arithmetic strategy, and hazard handling to code without inventing new architecture.
 - `implementation policy`
-  Verilog coding style constraints, reset rules, arithmetic restrictions, lint or synthesis constraints, and comment language.
+  Coding style constraints, reset rules, arithmetic restrictions, lint or synthesis constraints, and comment language.
 - `reuse constraints`
   Whether CBB/IP reuse is required, preferred, or disallowed.
 - `parameterization rules`
@@ -85,16 +79,17 @@ Typical questions this skill should ask when needed:
 - Are error, flush, or backpressure semantics fully frozen?
 - Are there DFT-visible modes, scan assumptions, or timing exceptions that change the implementation boundary?
 - For parameterized modules, what ranges and boundary semantics are valid for each exposed parameter?
-- Does anyone expect `SystemVerilog` implementation syntax? If so, clarify that this skill still delivers synthesizable `Verilog` RTL.
+- Does anyone expect implementation syntax or coding templates that conflict with `references/rtl-rules.md`?
 
 ### Step 3: Run The CBB/IP Reuse Gate
 
 Run the reuse gate after implementation readiness is satisfied and before custom coding starts.
 
-1. Ask the user whether this implementation must prefer existing `CBB/IP`.
-2. If reuse is required or preferred, scan the repository for explicit catalogs, IP lists, wrapper docs, or approved reuse inventories.
-3. Only use documented reuse candidates. Do not guess capabilities from names alone.
-4. If reuse is required but no explicit in-repo list exists, stop and ask the user for the CBB/IP list or catalog.
+1. Determine from the prompt, existing design inputs, or project rules whether this implementation must prefer existing `CBB/IP`.
+2. Ask the user about reuse preference only if the current inputs do not already answer it.
+3. If reuse is required or preferred, scan the repository for explicit catalogs, IP lists, wrapper docs, or approved reuse inventories.
+4. Only use documented reuse candidates. Do not guess capabilities from names alone.
+5. If reuse is required but no explicit in-repo list exists, stop and ask the user for the CBB/IP list or catalog.
 
 ### Reuse Decision Classes
 
@@ -139,14 +134,12 @@ Otherwise, proceed directly to RTL.
 
 Write RTL that is clear, reviewable, and ready for downstream verification.
 
-Open `references/patterns.md` only after Steps 0 to 4 are complete, and only load the sections relevant to the current work such as datapath, FSM, storage, CDC, or CBB wrapper patterns.
+Deliver synthesizable `Verilog` RTL only unless the user changes the requirement after you explain the skill boundary conflict.
+Follow `references/rtl-rules.md` as the mandatory rule set. Open `references/patterns.md` only after Steps 0 to 4 are complete, and only load the patterns relevant to the current work.
 
-- Use the confirmed `Verilog` coding style and project rules.
+- Use the confirmed coding style and project rules that do not conflict with `references/rtl-rules.md`.
 - Keep control, datapath, and wrapper responsibilities explicit.
 - Make reuse boundaries obvious in code.
-- Use comments for intent and tricky behavior, not for trivial assignments.
-- Keep arithmetic sizing explicit.
-- Avoid hidden CDC logic. Use approved structures or dedicated modules.
 - Do not silently add architecture beyond what was confirmed in the readiness gate.
 
 The RTL should make these decisions explicit:
@@ -198,7 +191,7 @@ Default delivery includes all of these:
 
 Verify:
 - The target really was implementation-ready and not still an architecture problem.
-- The RTL is written as synthesizable `Verilog`, not `SystemVerilog` syntax.
+- The mandatory rules in `references/rtl-rules.md` were followed.
 - Comment language was confirmed with the user.
 - Reuse preference was explicitly checked.
 - Required CBB/IP documentation existed before reuse was selected.
@@ -211,7 +204,8 @@ Verify:
 Stop instead of guessing when:
 - the object is not yet a stable implementation boundary
 - interface semantics are still changing
-- the user or project insists on `SystemVerilog` implementation syntax instead of `Verilog` delivery
+- the user or project insists on coding requirements that conflict with `references/rtl-rules.md`
+- the user tries to bypass a required readiness, reuse, or strategy gate
 - comment language has not been confirmed
 - reuse is required but no explicit CBB/IP inventory is available
 - a project rule conflicts with the current inputs

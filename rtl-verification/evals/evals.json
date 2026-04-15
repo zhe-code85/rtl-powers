@@ -1,0 +1,82 @@
+{
+  "skill_name": "rtl-verification",
+  "evals": [
+    {
+      "id": 1,
+      "name": "verification-analysis-only-does-not-require-environment",
+      "prompt": "请为 `packet_filter` 只做 design weakness analysis 和 verification plan，不需要写 testbench，也不需要跑回归。仓库里还没确认安装了哪种仿真器。",
+      "expected_output": "应该继续完成弱点分析和验证计划，不应因为没有先确认 VCS、Verilator 或 cocotb 就停住。输出里可以把 simulator/framework 记为 not required yet 或未定，而不是强制要求 runnable 环境。",
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "verification-environment-prefers-existing-harness-vcs-and-cocotb",
+      "prompt": "请为 `fifo_status_wrapper` 搭一个可执行验证环境。仓库里已经有 Makefile、pytest 入口和一个可扩展的 cocotb harness，同时环境里也能找到 `vcs`、`verilator` 和 `cocotb`。",
+      "expected_output": "在需要 executable collateral 时，应该先识别并复用现有 harness，再按优先级选择 `VCS` 作为 simulator，并使用 `cocotb` 作为 framework，而不是无视已有入口重搭一套并行验证流，也不是直接退到 Verilator 或手写 Verilog testbench。",
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "verification-environment-falls-back-to-verilator-and-verilog-tb",
+      "prompt": "请为 `priority_mux` 写一个可执行验证环境。仓库没有 `vcs`，但有 `verilator`。环境里也没有 `cocotb`。",
+      "expected_output": "应该按优先级退到 `Verilator`，然后因为 `cocotb` 不可用而退到手写自检 `Verilog TB`。不能因为没有 cocotb 就说无法验证，也不能假设存在 VCS。",
+      "files": []
+    },
+    {
+      "id": 4,
+      "name": "verification-feature-timeout-needs-positive-and-adverse-cases",
+      "prompt": "请为一个带 response timeout timer 的 `axi_lite_read_bridge` 制定 verification plan。需求文档写明：收到响应前计时，超时后返回错误并回到 idle。",
+      "expected_output": "应该先从文档抽 feature list，并为 timeout 相关 feature 同时给出 positive 和 adverse 场景。positive 场景是超时前收到响应并正确完成；adverse 场景是超过门限未收到响应并触发 timeout 路径。计划中还应把 timeout recovery 作为 weakness 或验证目标显式覆盖。",
+      "files": []
+    },
+    {
+      "id": 5,
+      "name": "verification-target-not-ready-returns-to-design",
+      "prompt": "请直接给 `dma_cmd_router` 写 testbench。当前 port list 还在改，flush 语义也没冻结，参数范围也还没定。",
+      "expected_output": "应该先判断 verification target 不稳定，停止进入 testbench 实现，并明确返回 `rtl-design` 或要求先冻结 DUT contract。不能在接口和行为还在变化时直接开始写验证环境。",
+      "files": []
+    },
+    {
+      "id": 6,
+      "name": "verification-case-allocation-splits-different-control-pass-criteria",
+      "prompt": "请为一个已有 `control` 测试文件的 DDS 模块增加新需求。现有 case 已验证 `en=0` 时 freeze hold。新需求是 `ftw=0` 在重新使能后必须从初始相位重启且保持直流输出。两者都与运行控制有关。",
+      "expected_output": "应该识别这两个需求虽然都属于 control intent，但 pass criteria 不同：一个证明 hold，另一个证明 restart after zero-FTW commit。不能简单塞进同一个 case；应拆成独立 case，并说明是否继续共用 control 文件还是再拆 bucket。",
+      "files": []
+    },
+    {
+      "id": 7,
+      "name": "verification-case-allocation-rejects-convenience-driven-aggregation",
+      "prompt": "请继续完善 `packet_timer_unit` 的验证。你刚刚已经有一个 `basic` case 验证 reset 后进入 idle。现在新增三个需求：timeout 边界值、timeout 与 flush 同拍冲突、以及长时间随机等待下无假 timeout。为了省文件，能不能都先塞到现有 basic case 里？",
+      "expected_output": "不应该接受按方便程度聚合。应该把三个需求分别映射到 boundary、corner 或 stress 类别，并明确拒绝把它们全部塞进现有 basic case。输出应说明 basic 只保留 smoke intent，新需求按 dominant purpose 分配。",
+      "files": []
+    },
+    {
+      "id": 8,
+      "name": "verification-case-allocation-still-matters-after-correct-weakness-analysis",
+      "prompt": "请为 `cfg_sequencer` 增加一个新测试需求。你已经正确识别出 weakness 是 `cfg_update` 与 `en` 同拍时的优先级歧义。仓库里只有一个现成的 `basic` 文件。请决定把这个需求加到哪里。",
+      "expected_output": "即使 weakness 识别正确，也不能因为只有 `basic` 文件存在就把该需求塞进去。应该把它归类为 control or protocol intent，建议新建对应 case 或文件，并解释 placement decision。",
+      "files": []
+    },
+    {
+      "id": 9,
+      "name": "verification-case-decomposition-splits-one-bucket-into-multiple-cases",
+      "prompt": "请为一个 DDS 模块的 `control` bucket 规划 test case。验证矩阵里已经有 4 个场景：`en=0` freeze hold、运行中 cfg commit 不跳相、`ftw=0` 后重新使能保持直流输出、`cfg_update` 与 `en` 同拍时的优先级。它们都属于 control intent。请决定这个 bucket 里应该有几个 case，为什么。",
+      "expected_output": "不能因为都属于 control intent 就塞成一个大 case。应该按 primary verification question 和 pass criteria 拆成多个 case，至少把 freeze hold、cfg commit continuity、zero-FTW restart、same-cycle priority 分开说明，或清楚说明哪些可以同 case、哪些必须分开。",
+      "files": []
+    },
+    {
+      "id": 10,
+      "name": "verification-case-decomposition-shared-setup-does-not-force-merge",
+      "prompt": "一个 FIFO 模块的 `boundary` bucket 里有 3 个场景：空 FIFO 读、满 FIFO 写、指针 wraparound。三者都共用相同 reset 和基础 driver。为了省代码，能不能把它们写成一个边界大 case，按顺序依次跑完？",
+      "expected_output": "不应该仅因为 reset 和 driver 共用就强行合并。输出应明确说明 shared setup 应抽成 helper 或 fixture，而 case 仍按 primary question / failure story 拆开，至少避免把空读、满写、wraparound 变成一个多阶段串行故事。",
+      "files": []
+    },
+    {
+      "id": 11,
+      "name": "verification-case-decomposition-refactors-overgrown-existing-case",
+      "prompt": "现有 `test_timer_control_behavior` 已经先验证 reset 后 idle，再验证 timeout 触发，再验证 flush 恢复，再验证随机长等待下无假 timeout。最近定位失败越来越难。请判断这个已有 case 是否应该拆分，如果要拆，按什么原则拆。",
+      "expected_output": "应该识别这是一个过大的多阶段 case，并按 dominant intent 内的 primary verification question、pass criteria、checker style 或 failure story 拆分。输出应明确提到 later-stage dependency / debug ambiguity 是拆分信号，而不是继续往一个 case 里加注释。",
+      "files": []
+    }
+  ]
+}

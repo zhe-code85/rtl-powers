@@ -1,282 +1,305 @@
 ---
 name: rtl-verification
-description: Analyze RTL design weaknesses and create comprehensive verification plans using cocotb (primary) or Verilog testbenches. Use when verifying RTL, writing testbenches, planning verification, checking coverage, testing a module, or ensuring design correctness. Also use when user asks about testbench creation, stimulus generation, assertion writing, or coverage closure. Triggers on verification, testing, testbench, coverage, assertions, cocotb, or any request to validate RTL behavior.
+description: Use when verifying RTL modules or blocks, building cocotb or Verilog testbenches, creating verification plans, analyzing design risk, defining assertions or coverage, or checking regression closure for RTL behavior. Also use when the user says things like "write a testbench for this module", "how do I verify this block", "what is not tested yet", "add assertions", "analyze this failing regression", or "help close verification for this RTL".
 ---
 
 # RTL Verification
 
-## Verification Philosophy
-
-Verify design intent, not implementation details. A testbench that checks internal signals is fragile; one that checks observable behavior is resilient to RTL refactoring.
-
-Design weakness analysis drives verification planning. Do not write tests first and hope they cover the risks. Analyze the RTL for structural weaknesses, rank them by severity, then build a verification matrix that targets every identified risk.
-
-Functional correctness is necessary but not sufficient. A module that passes all functional tests may still fail timing, consume excessive area, or break under parameter corner cases. Verification plans must include boundary and stress tests that expose these classes of failure.
-
-## Step 0: Design Weakness Analysis (Mandatory Pre-Planning)
-
-Read the RTL before planning any tests. Every verification decision flows from what the design actually does and where it is vulnerable.
-
-### What to Read
-
-- Module port list: identify clock domains, reset domains, handshake interfaces
-- Parameter declarations: spot boundary values (DEPTH=1, WIDTH=0, RATIO=1)
-- FSM definitions: enumerate states, transitions, default/unused handling
-- Datapath structure: pipeline stages, FIFO depth, backpressure paths
-- Clock domain crossings: synchronizer chains, Gray code converters, handshake CDC
-- Reset logic: sync vs async assert/deassert, partial resets, reset-less domains
-
-### Structural Weakness Detection
-
-Check for each pattern below. Document every finding with the signal or module location and risk level.
-
-**CDC Risk (High if present)**
-- Signal crossing clock domains without a 2+ stage synchronizer
-- Multi-bit bus crossing domains without Gray coding or handshake protocol
-- Pulse signals crossing domains without a pulse synchronizer
-- CDC feedback loops or req/ack with no maximum latency bound
-
-**Reset Domain (High if inconsistent)**
-- Async reset release not synchronized to local clock (recovery violation)
-- Partial reset that leaves some registers in undefined state while others clear
-- Counters or state registers missing reset (intentional vs oversight)
-- Reset active during normal operation (glitch susceptibility)
-
-**FSM Hazards (High if functional, Medium if recovery)**
-- Missing default state or default next-state assignment
-- Non-mutually-exclusive transition conditions (onehot encoding collision)
-- No idle/error recovery path from unreachable states
-- Output glitches during state transitions (registered vs combinational output)
-- Uncovered input condition combinations (partial case/casex coverage)
-
-**Datapath Hazards (High if data loss possible)**
-- FIFO or buffer overflow: write when full without proper backpressure stall
-- FIFO or buffer underflow: read when empty producing garbage data
-- Backpressure path breakage: valid/ready or almost-full not connected through pipeline
-- Width truncation: arithmetic result wider than destination without saturation check
-- Incomplete stall or flush logic: pipeline stall not propagated to all stages
-
-**Arbitration and Contention (High if deadlock, Medium if starvation)**
-- Round-robin or priority arbiter with possible starvation under sustained requests
-- Concurrent access to shared resource without mutual exclusion
-- Request/grant protocol with potential deadlock cycles (circular dependency)
-- Fairness not verified under asymmetric load patterns
-
-**Edge Case Traps (Medium if functional, Low if cosmetic)**
-- Counter wraparound: does the design handle 0xFFF -> 0x000 correctly?
-- Parameter boundary: DEPTH=1 (single-entry buffer), WIDTH=0 (null bus), RATIO=1 (no divide)
-- Simultaneous set and reset on a register (last-write-wins vs undefined)
-- Zero-length burst or packet (empty payload path)
-- Power-of-2 vs non-power-of-2 depth arithmetic
-
-### Risk Prioritization
-
-- **High**: Can cause functional error, deadlock, or data loss under normal operating conditions. Requires directed test plus assertion.
-- **Medium**: Can cause data corruption or incorrect behavior under specific conditions. Requires boundary or corner test.
-- **Low**: Occurs only in rare edge cases or parameter combinations. Requires at least one directed scenario.
-
-Feed the complete weakness list into the verification matrix in Step 1.
-
-## Step 1: Verification Planning
-
-### Build the Verification Matrix
-
-Organize tests in escalating levels. Each level has a distinct purpose and closure criterion.
-
-| Level | Purpose | Example | Closure |
-|-------|---------|---------|---------|
-| Sanity | DUT compiles, resets to known state, basic IO works | Reset brings all outputs to idle | Pass in 10 cycles |
-| Directed | Target specific weaknesses with known stimulus | CDC handshake completes across domains | Known-good response per test |
-| Boundary | Test at parameter and arithmetic limits | FIFO at full depth, counter at max value | Correct behavior at edges |
-| Corner | Combine edge conditions simultaneously | Full FIFO during backpressure with CDC | No deadlock, no data corruption |
-| Stress | Sustained operation with random or maximal stimulus | 10K random transactions at max throughput | Zero errors in sustained run |
-
-### Map Weaknesses to Tests
-
-For each weakness from Step 0:
-- Every High-risk weakness gets at least one directed test AND one assertion.
-- Every Medium-risk weakness gets at least one boundary or corner test.
-- Every Low-risk weakness gets at least one directed scenario.
-- Overlapping weaknesses can share a test, but each weakness must be explicitly covered.
-
-### Closure Criteria
-
-Define what "done" means before writing tests:
-- All directed tests pass for the target DUT configuration.
-- All assertions hold across every test level.
-- Functional coverage hits target for all spec invariants.
-- Code coverage: statement >95%, branch >90%, FSM 100% state+transition.
-- No unresolved High or Medium risk items.
-
-## Step 2: Cocotb Testbench Architecture (Primary Framework)
-
-Use cocotb for all non-trivial verification. Its Python-based coroutine model, rich ecosystem, and pytest integration make it the best choice for structured verification.
-
-### Project Structure
-
-```
-tb/
-├── Makefile              # cocotb build/run entry point
-├── conftest.py           # pytest configuration for cocotb
-├── test_module.py        # test cases grouped by verification level
-├── tb_driver.py          # stimulus drivers (cocotb coroutines)
-├── tb_monitor.py         # output observers
-├── tb_scoreboard.py      # expected vs actual comparison
-├── tb_refmodel.py        # reference model (Python)
-└── hdl/
-    └── tb_wrapper.v      # optional Verilog wrapper for DUT instantiation
-```
-
-### When to Use Lightweight vs cocotb-bus
-
-- **Lightweight** (recommended starting point): hand-write Driver/Monitor as plain coroutines. Use for simple interfaces, custom protocols, or when you want zero framework overhead.
-- **cocotb-bus**: use for standard bus interfaces (AXI, APB, Wishbone) where the bus driver abstraction provides real value. Adds dependency but handles burst, protocol checking, and interleaving.
-
-See `references/cocotb_patterns.md` for complete working examples of both approaches.
-
-### Stimulus Strategy
-
-1. Start with directed tests targeting each weakness. Each test is a standalone coroutine.
-2. Add constrained-random stimulus using Python `random` or hypothesis for coverage holes.
-3. For stress tests, use cocotb `fork` (or `start_soon`) to run concurrent stimulus generators and checkers.
-4. Always pair stimulus with a checker. Unguarded stimulus proves nothing.
-
-### Reference Model Integration
-
-Build a Python reference model that mirrors DUT behavior at the transaction level:
-- Same inputs as DUT (fed by shared Driver)
-- Produces expected outputs for Scoreboard comparison
-- Does not need cycle-accuracy for most checks; functional equivalence suffices
-- For cycle-accurate checks, use phase-aligned monitors
-
-### Regression with pytest
-
-Integrate with pytest for parameterized regression, structured reporting, and CI compatibility. See `references/cocotb_patterns.md` Section 5 for the full setup.
-
-## Step 3: Verilog Testbench Fallback
-
-Use Verilog testbenches only when cocotb is unavailable or for quick sanity checks on simple DUTs. A Verilog testbench is better than no testbench, but it lacks the structural advantages of cocotb (coroutine concurrency, Python ecosystem, pytest integration).
-
-### When to Choose Verilog TB
-
-- cocotb is not installed and cannot be installed
-- DUT is a simple combinational block or single-clock single-domain module
-- Quick sanity check needed in under 5 minutes
-- Project mandates Verilog-only testbenches
-
-### Self-Checking Pattern
-
-Structure the testbench around tasks:
-- `task apply_reset`: deassert reset with known timing
-- `task apply_stimulus`: feed one test vector
-- `task check_output`: compare actual vs expected, flag PASS/FAIL
-- `task run_all_tests`: sequential loop over test vectors with pass/fail counter
-- Final `$display` summary with pass count and fail count
-
-### Migration Path to Cocotb
-
-When the Verilog TB grows beyond 200 lines or needs concurrent stimulus, migrate:
-1. Keep the test vectors and expected results (they are data, not framework)
-2. Replace task-based stimulus with cocotb coroutines
-3. Replace `$display` checks with Python assert or Scoreboard
-4. Add concurrent stimulus that was impossible in Verilog tasks
-
-## Step 4: Assertion Strategy
-
-Assertions are the most efficient way to catch bugs because they fire at the exact cycle the violation occurs, rather than propagating errors downstream.
-
-### Placement Principle
-
-- **Boundary assertions**: check interface protocols at DUT boundaries (valid/ready, FIFO full/empty, CDC handshake). These catch integration bugs.
-- **Invariant assertions**: check internal properties that must always hold (one-hot encoding, mutual exclusion, range limits). These catch logic bugs.
-- **Protocol assertions**: check sequence-level behavior (burst length, handshake ordering, response latency). These catch timing bugs.
-
-### SVA in RTL (Primary)
-
-Place SystemVerilog Assertions inside or beside the RTL module. They compile with the design, require no testbench, and fire in every simulation. See `references/assertion_patterns.md` for complete examples.
-
-Guidelines:
-- One assertion per invariant. Do not combine unrelated checks.
-- Use `cover` properties alongside `assert` to confirm the assertion is actually exercised.
-- Use `$rose`/`$fell`/`$past` for temporal checks, not for combinational ones.
-- Guard assertions with reset: most assertions should disable during reset using `disable iff (!rst_n)`.
-
-### Cocotb Checkers (Supplementary)
-
-Use Python-side checkers for properties that are awkward in SVA:
-- Multi-cycle transaction-level checks (packet integrity, reorder verification)
-- Statistical checks (throughput measurement, latency distribution)
-- Checks requiring reference model comparison
-
-See `references/assertion_patterns.md` Section 3 for cocotb checker patterns.
-
-### Assertion Density
-
-Too many assertions is as bad as too few. Noisy assertions that fire every cycle train engineers to ignore them. Follow these rules:
-- Assertions should fire only on violation, never on correct behavior.
-- Avoid testing implementation details (internal signal values that could change in a refactor).
-- Avoid over-specified timing assertions that break with retiming or pipelining changes.
-
-## Step 5: Coverage Strategy
-
-Coverage quantifies how thoroughly the design has been exercised. Without coverage targets, you do not know when verification is complete.
-
-### Functional Coverage
-
-Derive coverage points directly from spec invariants and design weakness analysis:
-- Each FSM state visited (coverpoint on state register)
-- Each handshake direction exercised (valid without ready, ready without valid, simultaneous)
-- Each FIFO condition (empty, full, almost-empty, almost-full, partial)
-- Each parameter boundary value exercised
-- Each arbitration outcome (each requestor granted, idle, simultaneous request)
-
-### Cocotb Coverage API
-
-Use `cocotb.coverage` to define cross-coverage and transaction-level coverage that is awkward in SystemVerilog covergroups:
-- Define `CoverPoint` and `CoverCross` in Python
-- Sample in monitors after each transaction
-- Report coverage at test end
-
-### Code Coverage
-
-Run code coverage as a safety net, not a goal:
-- Statement coverage: target >95%. Below 90% indicates untested logic paths.
-- Branch coverage: target >90%. Uncovered branches may be dead code or missing tests.
-- Toggle coverage: useful for identifying undriven or unread signals.
-- FSM coverage: target 100% state and transition. Any uncovered state or transition is a test gap.
-
-Code coverage is misleading when:
-- Dead code inflates coverage gaps (remove dead code, do not test it)
-- Redundant logic hits coverage targets without testing real behavior
-- Coverage is high but functional coverage is low (tested code, wrong scenarios)
-
-### Closure Criteria
-
-Coverage closure is achieved when:
-- All functional coverage points from the spec are hit
-- Code coverage meets targets (with justified waivers for unreachable code)
-- All High-risk weakness assertions pass under stress conditions
-- Zero unresolved assertion failures across the full regression
-
-## Blind Spots and Risk Assessment
-
-After completing the verification plan, explicitly state what it does NOT cover:
-
-- Asynchronous timing hazards (metastability, recovery/removal): simulation does not model real metastability. Use SDC constraints and CDC tools for these.
-- Analog boundary effects: mixed-signal interfaces need separate verification.
-- Gate-level behavior: post-synthesis simulation may reveal different behavior due to optimization.
-- Power intent: UPF/CPF power domain transitions are not verified by functional tests.
-- Parameter combinations not explicitly tested: if the design has 5 parameters with 3 values each, you cannot test all 243 combinations. Document which ones are tested and which are waived.
-
-State residual risk explicitly. A verification plan without stated blind spots is dishonest.
-
-## Output Format
-
-Produce two artifacts for every verification engagement:
+Verify design intent, not implementation trivia. Start from the DUT's externally visible contract, identify structural weaknesses, then build tests, assertions, and coverage that close those risks.
+
+- `rtl-design` owns architecture, module boundaries, and design intent.
+- `rtl-impl` owns implementation structure and RTL delivery.
+- `rtl-verification` owns weakness analysis, verification planning, testbench strategy, assertion strategy, and closure.
+
+Default preference is cocotb, but the final framework choice follows Step 1 environment discovery. Use a Verilog testbench only when cocotb is unavailable, the DUT is trivial, or project constraints require it. Open `references/cocotb_patterns.md` only when building cocotb collateral. Open `references/assertion_patterns.md` only when you need concrete assertions, checkers, or coverage patterns. If the project mandates UVM or formal property verification, use this skill for weakness analysis, verification planning, assertion intent, and closure triage, then hand off the UVM- or FPV-specific implementation to the project flow.
+
+## Default Flow
+
+### Step 0: Confirm The Verification Target
+
+Start by identifying the exact verification object.
+
+Continue only if all of these are true:
+- The target is a stable module, block, or wrapper boundary.
+- External interface semantics are frozen enough to verify.
+- The user wants verification analysis, a testbench, a verification plan, or closure work.
+
+Stop and return to `rtl-design` or `rtl-impl` if any of these are still moving:
+- Port list, ordering rules, handshake semantics, flush semantics, or ownership rules.
+- Major microarchitecture changes that would invalidate the planned verification intent.
+- Undefined parameter ranges or reset behavior that prevent meaningful testbench design.
+
+### Step 1: Discover The Verification Environment
+
+Run this step only when the request requires runnable collateral, regression execution, or a concrete framework choice. For `analysis-only` or planning-only work, record simulator and framework as `not required yet` unless the user explicitly asks for an executable environment.
+
+When this step applies, discover the actual execution environment in this order:
+1. existing project harness: check `Makefile`, `pytest`, `conftest.py`, CI scripts, wrapper TB files, README commands, and simulator launch scripts; prefer extending a usable harness over creating a parallel flow
+2. lightweight environment discovery: if the repository does not already answer the question, use direct command or environment checks instead of writing a new discovery script
+3. decision and recording: choose simulator and framework using the priority rules below, then record the result in the verification plan
+
+Apply these priority rules:
+
+- Simulator
+  Prefer `VCS` when it is available in the project environment or scripts.
+  If `VCS` is not available, fall back to `Verilator`.
+  If neither simulator is available, stop and tell the user that no supported simulator was found.
+- Testbench framework
+  After the simulator is chosen, check whether `cocotb` is available in the environment or already used by the project.
+  If `cocotb` is available, use it with the chosen simulator.
+  If `cocotb` is unavailable, fall back to a hand-written self-checking Verilog testbench.
+
+Record the chosen environment in the plan:
+- simulator: `VCS` or `Verilator`
+- framework: `cocotb` or `Verilog TB`
+- reuse: whether an existing harness can be extended
+
+### Step 2: Collect Verification Inputs
+
+Gather whatever inputs already exist:
+- Feature list from the spec, requirements doc, module-design doc, or user-provided behavior notes
+- RTL source for the DUT and any required wrappers
+- `rtl-design` document, if present
+- `rtl-impl` implementation trace or handoff, if present
+- User-provided requirements, bug reports, or corner cases
+- Existing testbench files, assertions, coverage reports, and regression logs
+- Project simulator and framework constraints
+
+Start with the feature list before anything else:
+- Read the requirements or design document and extract the explicit feature list.
+- If no formal feature list exists, derive one from the DUT contract and user-provided behavior.
+- For each feature, write one `positive` example and one `adverse` example.
+- `positive` example: the feature is exercised correctly and should succeed.
+- `adverse` example: the feature is violated, blocked, saturated, or driven with an invalid condition, and the DUT should reject it, hold state, raise an error, apply backpressure, or otherwise behave safely according to the contract.
+- If a feature depends on a timer, watchdog, response window, or wait counter, its `adverse` example must include a timeout scenario.
+- If a feature truly has no meaningful adverse case, record that waiver explicitly in the plan instead of silently omitting it.
+
+Treat this feature list plus its positive and adverse examples as a first-class verification input. The feature list answers "what behavior must exist"; the weakness analysis answers "where the implementation is likely to break".
+
+If the request is to write tests, do not skip input collection. Verification without a stable contract becomes cargo-cult stimulus.
+
+### Step 3: Run Design Weakness Analysis
+
+Read the RTL before planning tests. Every verification decision should trace back to what the RTL actually does and where it is vulnerable.
+
+Inspect at least these areas:
+- Module port list: clock domains, reset domains, handshake interfaces
+- Parameters: boundary values such as `DEPTH=1`, `WIDTH=1`, `RATIO=1`
+- FSM structure: states, transitions, default handling, recovery paths
+- Datapath: pipeline cuts, buffer ownership, backpressure paths, truncation points
+- CDC structures: synchronizers, handshakes, Gray coding, pulse transfers
+- Reset structure: sync vs async behavior, partial reset, intentionally unreset registers
+
+Document every weakness with location and risk level.
+For each weakness, capture at least:
+- ID
+- category
+- location
+- failure symptom
+- risk level
+- planned verification hook such as directed test, assertion, checker, or coverage point
+
+Look especially for these weakness classes:
+- `CDC risk`: missing synchronizer, unsafe multi-bit crossing, pulse transfer hazard, unbounded req/ack progress
+- `Reset risk`: unsynchronized release, partial reset ambiguity, unintentionally unreset state, reset glitching into normal operation
+- `FSM hazard`: missing recovery path, non-exclusive transitions, combinational output glitch risk, missing timeout or wait recovery
+- `Datapath hazard`: overflow or underflow, incomplete backpressure, implicit truncation or sign handling, incomplete stall or flush coverage
+- `Arbitration risk`: starvation, missing mutual exclusion, deadlock-prone request/grant sequencing
+- `Edge-case trap`: wraparound, zero-length behavior, power-of-2 versus non-power-of-2 divergence, simultaneous control priority, timeout boundary ambiguity
+
+Risk prioritization:
+- `High`: can cause functional error, deadlock, or data loss in normal operation
+- `Medium`: can corrupt data or break behavior under specific boundary conditions
+- `Low`: rare edge case or parameter corner that still deserves at least one directed scenario
+
+Feed the full weakness list into Step 4. Do not write tests first and hope the list emerges later.
+
+### Step 4: Build The Verification Plan
+
+Turn the weakness list into a verification matrix before writing collateral.
+
+Use these levels:
+
+| Level | Purpose | Typical Goal |
+| --- | --- | --- |
+| Sanity | Compile, reset, basic IO legality | DUT enters known idle behavior |
+| Directed | Target a specific weakness | One risk, one deterministic scenario |
+| Boundary | Exercise limits and extrema | Max/min parameters, empty/full, wraparound |
+| Corner | Combine multiple adverse conditions | No deadlock or corruption under overlap |
+| Stress | Sustained or randomized operation | Stable behavior over long regressions |
+
+Map every weakness explicitly:
+- Every `High` weakness gets at least one directed test and one assertion.
+- Every `Medium` weakness gets at least one boundary or corner test.
+- Every `Low` weakness gets at least one directed scenario.
+- Shared tests are allowed, but coverage must still be traceable per weakness.
+
+Map every feature explicitly:
+- Every feature from Step 2 gets at least one `positive` scenario.
+- Every feature from Step 2 gets at least one `adverse` scenario, unless the contract explicitly states there is no meaningful invalid, blocked, or stressed case.
+- A single test may cover both a feature example and a weakness, but both mappings must remain visible in the plan.
+
+Plan parameterized verification explicitly:
+- Separate smoke points from boundary points and cross-product points.
+- Do not try to brute-force every parameter combination unless the space is tiny.
+- Pick representative tuples that cover minimum, maximum, singleton, power-of-2, and non-power-of-2 cases when relevant.
+- Record which parameter combinations are executed and which are intentionally deferred.
+- Record test allocation explicitly: which scenario goes into which test file or test bucket, and why it belongs there.
+
+Define closure before implementation:
+- Directed tests for the chosen DUT configuration pass.
+- Assertions hold across all executed levels.
+- Functional coverage hits the intended invariants.
+- Code coverage targets are either met or waived with justification.
+- No unresolved `High` or `Medium` risk item remains hidden.
+
+### Step 5: Plan Assertions And Coverage
+
+Assertions and coverage are part of the plan, not optional polish.
+
+Plan assertions, coverage, and reference models together:
+- Use assertions for handshake legality, invariants, protocol ordering, bounded latency, mutual exclusion, range limits, and CDC protocol safety.
+- Prefer SVA in or beside RTL when the property is naturally expressed there. Use Python-side checkers for transaction-level or statistical properties that are awkward in SVA.
+- If the project uses FPV, mark which assertions are simulation-only checks and which are suitable formal properties.
+- Derive functional coverage from the spec and weakness list, not from whatever is easy to sample. Treat code coverage as a safety net, not the definition of correctness.
+- Use cover properties, covergroups, or Python-side coverage counters when they help prove that a protocol mode, timeout path, parameter corner, or adverse scenario was actually exercised.
+- Require a reference model when direct expected-value checking becomes fragile, such as arithmetic transforms, protocol translation, reordering, or multiple legal interleavings. Prefer a lightweight Python reference model in cocotb flows.
+
+Use `references/assertion_patterns.md` when you need concrete SVA assertions, cocotb checkers, or coverage patterns.
+
+### Test Case Decomposition
+
+Apply these rules during Step 4 planning and Step 6 implementation. Allocation decides which bucket a scenario belongs to. Decomposition decides how many distinct cases should exist inside that bucket.
+
+Use this sequence:
+1. group the verification matrix by dominant bucket or intent
+2. inside each bucket, group scenarios by primary verification question
+3. split cases again whenever setup lifecycle, checker model, or pass criteria diverge
+4. factor shared setup into helpers, fixtures, tasks, or drivers instead of merging unrelated checks into one case
+
+Case decomposition rules:
+- One case should answer one primary verification question.
+- One case should have one primary failure story that is easy to localize.
+- A case may cover multiple parameter or stimulus variants only when they preserve the same question, setup model, checker style, and pass criteria.
+- Shared reset or common driver code is not a reason to merge scenarios into one case.
+- If two scenarios need different scoreboards, reference models, timeout windows, or observability points, they should usually be separate cases even if they stay in the same file.
+
+Split a bucket into multiple cases when any of these are true:
+- the scenarios prove different semantic claims such as hold versus restart, legality versus recovery, or boundary behavior versus long-run correctness
+- the pass criteria differ
+- the setup or stimulus lifecycle differs
+- the checker, scoreboard, assertion set, or reference model differs
+- one part of the test depends on an earlier part succeeding before the real target can be observed
+- the case name would naturally contain "and", "then", or multiple independent phases
+- a failure would not immediately tell the engineer which requirement broke
+
+Refactor an existing case into multiple cases when:
+- it has grown into a multi-stage script with unrelated assertions
+- later checks rely on state prepared only by earlier checks
+- rerunning one scenario requires replaying unrelated behavior
+- debug requires reading many intermediate signals just to know which sub-story failed
+
+Worked decomposition example inside a `control` bucket:
+- `control_freeze_hold`: proves `en=0` holds phase and output
+- `control_cfg_commit_no_phase_jump`: proves runtime config commit updates FTW without phase discontinuity
+- `control_zero_ftw_restart`: proves restart semantics after zero-FTW commit
+
+Shared setup handling: keep the cases separate, extract repeated reset or helper stimulus into reusable helpers, and do not keep scenarios fused only because they can share a fixture.
+
+### Test Case Allocation And Evolution
+
+Do not allocate tests by convenience, DUT name, or "there is already a file open." Allocate them by dominant verification intent.
+
+Use three layers:
+- verification matrix: maps feature or weakness to required verification intent
+- test file or bucket: owns one dominant purpose such as `basic`, `control`, `boundary`, `corner`, `stress`, `waveform`, or `structure`
+- test case: owns one scenario, one setup story, and one primary pass or fail contract
+
+Default allocation rules:
+- Put smoke or reset legality into `basic` or `sanity`.
+- Put enable, freeze, commit, handshake, restart, or temporal protocol behavior into `control` or `protocol`.
+- Put max, min, wraparound, singleton, zero-length, or parameter extrema into `boundary`.
+- Put overlapping adverse conditions into `corner`.
+- Put long-run randomized or endurance checks into `stress`.
+- Put long-run numerical or sequence correctness into `waveform`, `datapath`, or another clearly scoped bucket.
+- Put verification-scoped static checks such as required checker shape, required helper boundaries, or source-shape rules that directly protect verification intent into `structure`. General lint or style enforcement belongs elsewhere.
+
+Merge a new demand into an existing case only if all of these are true:
+- same dominant verification goal
+- same setup and stimulus model
+- same pass criteria
+- no hidden dependency on earlier sub-scenarios in the same test
+- merging does not turn the case into a multi-stage story that is harder to debug
+
+If any merge criterion fails, do not append to the old case. Create a new case. If the existing file would become mixed-purpose, create a new file or bucket as well.
+
+When a new test demand appears during execution, use this sequence:
+1. map it to feature, weakness, and verification level
+2. identify its dominant verification intent
+3. compare that intent against existing file and case responsibilities
+4. merge only if every merge criterion holds
+5. otherwise create a new case, and usually a new file when the old file boundary would become mixed
+
+Worked example:
+- `basic`: reset and first legal output
+- `control`: enable rise, freeze hold, config-commit timing, restart semantics
+- `boundary`: `phase_init=max`, wraparound, `ftw=0`, singleton parameter edges
+- `waveform`: multi-cycle numerical correctness and output frequency
+- `structure`: verification-scoped static checks such as one-required-checker-per-block rules
+
+Anti-patterns:
+- do not add a wraparound boundary check into `basic` just because the DUT is the same
+- do not merge zero-FTW restart behavior into a freeze-hold case if one check proves hold semantics and the other proves restart semantics with different pass criteria
+
+### Step 6: Build Verification Collateral In The Chosen Environment
+
+Run this step only when the request includes executable collateral.
+If Step 1 was skipped because the request is `analysis-only` or planning-only, skip this step as well.
+Use the environment chosen in Step 1. Do not revisit the framework choice unless the discovered environment is incomplete or broken.
+
+For a `cocotb` flow:
+- Start with lightweight hand-written drivers and monitors unless a standard bus library provides real value.
+- Pair every stimulus source with a checker, scoreboard, or reference model.
+- Build the testbench to satisfy the assertions, feature scenarios, and coverage targets already defined in Steps 4 and 5.
+- Use `references/cocotb_patterns.md` for directory structure, regression setup, and reusable patterns.
+
+For a `Verilog TB` fallback:
+- Keep the testbench self-checking with tasks for reset, stimulus, output checking, and summary reporting.
+- Implement the same planned scenarios and checks, even if the framework is lighter.
+- Treat it as a fallback, not the default growth path.
+
+### Step 7: Deliver Verification Artifacts
+
+Default delivery depends on the request:
+
+- `analysis-only`
+  Deliver a weakness report and a verification plan. Runnable simulator or framework setup is optional unless the user explicitly asks for it.
+- `planning + implementation`
+  Deliver the weakness report, verification plan, and the requested cocotb or Verilog collateral.
+- `closure or debug follow-up`
+  Deliver updated risk status, failing or passing checks, and remaining residual risk.
+
+When debugging a failing regression or checker:
+1. Localize the failing test, assertion, or checker and identify the first observable divergence.
+2. Map the failure back to the verification matrix and the related weakness or feature.
+3. Classify the issue as a testbench bug, design bug, or contract gap.
+4. If it is a testbench bug, repair the collateral and keep the original intent unchanged.
+5. If it is a design bug, return the failing evidence and affected intent to `rtl-impl`.
+6. If it is a contract gap or interface ambiguity, return to `rtl-design`.
+7. Update the weakness report, plan, and residual-risk summary so closure status stays current.
+
+Always state what is not covered:
+- Real metastability behavior and async timing hazards
+- Analog or mixed-signal boundary effects
+- Gate-level optimization effects unless specifically simulated
+- Power-intent behavior unless UPF/CPF verification is in scope
+- Untested parameter combinations
+
+## Output Delivery
 
 ### 1. Weakness Report
 
-```
+```text
 ## Design Weakness Report: [module_name]
 
 ### Summary
@@ -285,19 +308,20 @@ Produce two artifacts for every verification engagement:
 - Low risk: [count]
 
 ### Findings
-| ID | Category | Location | Description | Risk | Mitigation |
-|----|----------|----------|-------------|------|------------|
-| W1 | CDC      | sig_x    | Missing synchronizer | High | Add 2-stage sync + assertion |
+| ID | Category | Location | Symptom | Risk | Verification Hook |
+|----|----------|----------|---------|------|-------------------|
+| W1 | CDC | sig_x | Missing synchronizer can corrupt data crossing | High | Directed CDC test plus sync assertion |
 ```
 
 ### 2. Verification Plan
 
-```
+```text
 ## Verification Plan: [module_name]
 
-### Testbench Framework
-- Primary: cocotb + [simulator]
-- Fallback: Verilog TB (if applicable)
+### Chosen Environment
+- Simulator: [VCS/Verilator/not required yet]
+- Framework: [cocotb/Verilog TB/not required yet]
+- Harness reuse: [yes/no, description]
 - Reference model: [yes/no, description]
 
 ### Verification Matrix
@@ -306,6 +330,18 @@ Produce two artifacts for every verification engagement:
 | T1 | Sanity | -- | Reset brings DUT to idle | All outputs = idle after reset |
 | T2 | Directed | W1 | CDC handshake | Correct data transfer across domains |
 
+### Test Allocation
+| Bucket Or File | Dominant Intent | Scenarios Assigned | Why Here |
+|----------------|-----------------|--------------------|----------|
+| basic | Sanity | Reset and first legal output | Smoke legality only |
+| boundary | Boundary | Max input wraparound | Different purpose and pass criteria from basic |
+
+### Case Decomposition
+| Bucket | Case ID | Primary Question | Shared Setup | Why Separate |
+|--------|---------|------------------|--------------|--------------|
+| control | control_freeze_hold | Does disable hold state and output? | Reset plus running configuration | Different pass criteria from restart semantics |
+| control | control_zero_ftw_restart | Does restart from init phase stay DC after zero-FTW commit? | Reset plus running configuration | Different primary failure story from freeze hold |
+
 ### Assertion Inventory
 | Assert ID | Type | Location | Property |
 |-----------|------|----------|----------|
@@ -313,8 +349,19 @@ Produce two artifacts for every verification engagement:
 
 ### Coverage Targets
 - Functional: [list of coverpoints]
-- Code: statement >95%, branch >90%, FSM 100%
+- Code: [targets or waivers]
 
 ### Residual Risk
-- [stated blind spots and untested conditions]
+- [blind spots and untested conditions]
 ```
+
+## When To Stop And Ask For Guidance
+
+Stop instead of guessing when:
+- The DUT contract is still changing
+- Required simulator or framework support is unknown
+- The verification request depends on unresolved design intent
+- The user asks for assertions or checks that overfit unstable implementation details
+- Parameter legality or reset behavior is too ambiguous to verify responsibly
+
+The default failure mode of this skill is to surface risk and ask for the missing verification input, not to fabricate a false sense of coverage.
