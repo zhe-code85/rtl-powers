@@ -40,7 +40,21 @@
       "id": 6,
       "name": "missing-info-boundary-change",
       "prompt": "请帮我做一个流式处理 block 的设计文档。要求是有输入输出接口、需要高吞吐、可能有 flush，也可能跨两个时钟域，但这些我还没定。你先设计吧。",
-      "expected_output": "技能不应直接拍板详细设计。它应把未定的协议/flush/CDC 信息识别为边界变化风险，并通过 open questions 或追问体现：\n1. 未定 flush 语义会影响接口契约和模块划分\n2. 未定多时钟域会影响 CDC 边界和结构分解\n3. 当前对象更适合 architecture mode 或先澄清关键信息",
+      "expected_output": "技能不应直接产出设计文档。它必须先停下来澄清阻塞性需求，并明确说明在需求未明确前不能落盘设计：\n1. 未定 flush 语义会影响接口契约和模块划分\n2. 未定多时钟域会影响 CDC 边界和结构分解\n3. 当前对象更适合先澄清关键信息，而不是带着猜测输出 architecture/module-design 文档\n4. 回答应以阻塞问题和澄清问题为主，而不是夹带部分设计正文",
+      "files": []
+    },
+    {
+      "id": 7,
+      "name": "must-clarify-ambiguous-contract-before-doc",
+      "prompt": "请为一个 packet reorder block 写设计文档。它需要接收乱序返回的数据并按序输出，但我还没决定是按 transaction ID 重组还是按 arrival window 重组；flush 的时候是丢掉所有未完成项还是只丢特定 stream 也还没定；另外它可能和上游同域，也可能跨域。你先按常见做法设计一个吧。",
+      "expected_output": "技能必须拒绝带着猜测落盘设计，并先向用户澄清阻塞性歧义。输出应体现：\n1. transaction ID 重组与 arrival window 重组会改变存储和控制边界\n2. flush 范围会改变接口契约、状态清理和错误恢复语义\n3. 同域与跨域会改变 CDC 边界和结构\n4. 即使用户要求“按常见做法先设计”，也不能把这当成冻结默认方案的许可\n5. 在这些问题未确认前，不应输出任何正式设计文档或假定一种“常见做法”继续设计",
+      "files": []
+    },
+    {
+      "id": 8,
+      "name": "allow-short-blocking-question-list",
+      "prompt": "请帮我设计一个 stream aggregator。现在还没定三件事：输入端是 valid/ready 还是 credit-based，乱序输入时是否必须保持每个 source 内部顺序，另外聚合器和下游是否跨时钟域。你可以直接先给个架构草案，也可以先把关键问题列出来问我。",
+      "expected_output": "技能可以使用短列表问答式澄清，但不能直接开始设计。输出应体现：\n1. 允许用一个简短问题列表集中确认阻塞项\n2. 每个问题都对应明确的阻塞设计决策，例如接口契约、排序语义、CDC 边界\n3. 不应夹带架构草案、模块划分建议或基于猜测的默认方案\n4. 如果问题较多，应保持精简或分批，而不是展开成长篇需求访谈",
       "files": []
     }
   ]

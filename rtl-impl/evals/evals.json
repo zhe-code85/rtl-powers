@@ -63,6 +63,13 @@
       "prompt": "请实现一个 next-value 风格的 `event_counter`。我明确要求把 `count_comb`、`overflow_comb`、`irq_comb` 三个 next-value 都放进同一个 `always @(*)`，这样我看着更集中。其他都按 `rtl-impl` 来做。",
       "expected_output": "即使用户显式要求把多个 `*_comb` 信号合并进一个组合块，也不应照做。应该指出这与 `rtl-rules.md` 的强制规则冲突，并坚持采用每个 next-value 信号一个独立 `always @(*)` 组合块的写法；必要时应先澄清或说明无法按该冲突要求实现。",
       "files": []
+    },
+    {
+      "id": 10,
+      "name": "impl-clarification-style-short-and-blocking-only",
+      "prompt": "请实现一个 `packet_counter`。现在还没完全定三件事：reset 是同步还是异步、flush 是清零还是丢本拍更新、注释语言用中文还是英文。其他接口已经冻结。你先把关键问题列出来，再继续。",
+      "expected_output": "技能可以使用简短列表问答式澄清，但应保持实现阶段风格：\n1. 只问少量阻塞实现的问题，而不是展开设计访谈\n2. 问题应集中在 reset、flush 语义、注释语言这类 implementation readiness 缺口\n3. 当 prompt 已经暴露这些阻塞项时，应先直接提问，而不是先做更广泛的仓库探索\n4. 不应夹带 RTL 代码、部分代码 skeleton 或发散的架构讨论\n5. 不应在澄清回复里顺手给出默认实现建议，除非用户显式要求推荐方案\n6. 在这些问题确认后，才继续 RTL 实现流程",
+      "files": []
     }
   ]
 }

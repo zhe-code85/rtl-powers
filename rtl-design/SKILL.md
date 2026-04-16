@@ -9,6 +9,14 @@ Generate design documents for digital design engineers. This skill does not repl
 
 Do not select specific CBBs in this skill. Describe required structures such as FIFOs, storage arrays, arbiters, register slices, CDC structures, or counters by role and constraints only. Specific reuse mapping is deferred to `rtl-impl`.
 
+<HARD-GATE>
+After Step 0 determines the design mode, if any remaining unresolved choice would change the block structure, interface contract, timing plan, ordering/flush/retry behavior, or a CDC/reset/power boundary that affects block decomposition or interface ownership, stop and ask the user before drafting or writing any design document.
+
+Exception — early exploration: if the user explicitly signals they are still in early exploration before any specific requirements are locked (e.g., "I haven't decided the internals yet", "help me think through how to partition this", "I don't know how to split this yet"), produce a provisional architecture sketch using a canonical structure for the domain. Mark every structurally-uncertain node as **TBD** and annotate each with the specific open choice it depends on. Place the blocking questions at the end of the sketch rather than before it, so the user sees the full design space first.
+
+User wording such as "pick the common approach", "use a baseline", or "start with a typical design" does not bypass this gate when the user already has a defined system context with specific requirements.
+</HARD-GATE>
+
 ## Step 0: Determine The Mode
 
 Choose one mode before designing:
@@ -27,15 +35,16 @@ Choose `module-design mode` only if most of these are true:
 If the mode is still ambiguous after inspecting the request and project context, ask one question:
 `Is this object still being decomposed, or is it already ready for leaf/block-level detailed design?`
 
+Mode determination takes priority over other open questions. Once the mode is settled, remaining boundary-changing ambiguities are handled per the "Handling Missing Information" section.
+
 ## Shared Rules
 
 - Treat the current object as an ASIC subsystem, block, or module owned by a digital design engineer.
 - Use hardware semantics only: registers, combinational logic, valid/ready rules, storage ownership, clock edges, and cycle-level timing.
-- Record project dependencies explicitly. Do not invent chip-level policy for reset, DFT, clocking, test modes, power intent, or physical integration. If the project already defines them, inherit them. If not, list them as assumptions or open questions.
-- Do not default reset strategy to a house style. Reset choice is an integration dependency unless the user specifies it.
-- If reset, test, or clock interface names, active levels, or exact semantics are not explicitly provided by the user or parent document, describe them as inherited dependencies rather than inventing concrete ports or polarity.
+- Record project dependencies explicitly. Do not invent chip-level policy for reset, DFT, clocking, test modes, power intent, or physical integration. Detailed inheritance criteria are in "What To Inherit".
+  - Inherit only when the parent or project has explicitly defined the policy and the unresolved detail does not force a local design choice. If the local design would change depending on that answer, the item triggers the HARD-GATE instead of being recorded as an assumption.
+  - When inherited, describe reset, test, or clock interfaces as inherited dependencies with explicit ownership, rather than inventing concrete ports or polarity.
 - Keep protocol adaptation and configuration semantics visible, but allow light protocol state handling inside the core control layer when that simplifies the design.
-- Make verification guidance part of the design output: invariants, corner cases, illegal cases, observability hooks, and assumptions that the verification plan must honor.
 
 ## Architecture Mode
 
@@ -132,7 +141,7 @@ Define:
 - Ordering, flush, retry, error, and backpressure behavior
 - Parameter ranges and configuration effects
 
-If these are still unstable, stop and return to `architecture mode`.
+If these are still unstable, ask the user to clarify before proceeding. If clarification confirms the interfaces cannot be stabilized at this level, return to `architecture mode`.
 
 ### Step 3: Describe The Microarchitecture
 
@@ -169,9 +178,11 @@ The module design document must be detailed enough that:
 
 ## Handling Missing Information
 
-Ask the user only when the missing information changes the design boundary or invalidates a key contract.
+This section is an expansion of the HARD-GATE — not a separate rule. The HARD-GATE states when to stop; this section provides the specific criteria for what counts as boundary-changing, what can be inherited instead of asked, and the format for clarification questions.
 
-Treat missing information as boundary-changing when any of these would become different:
+### Boundary-Changing Criteria
+
+Missing information is boundary-changing when any of these would become different:
 - The current object would switch mode between `architecture mode` and `module-design mode`
 - A child block would merge, split, or move between protocol/config, core control, and datapath/storage layers
 - An interface contract would change in ordering, backpressure, retry, flush, or ownership semantics
@@ -183,13 +194,30 @@ Must ask if missing and architecture would change:
 - Throughput or latency contract
 - Whether the current object is still decomposing or already implementable
 - Ordering, flush, retry, or error semantics that affect partitioning
+- Data ownership, buffering ownership, or storage responsibility across block boundaries
+- Whether configuration, status, or error handling stays local or belongs to another block
+- Any requirement wording that admits more than one valid hardware interpretation
 
-Usually inherit or record as assumptions instead of inventing policy:
+### What To Inherit
+
+Record as inherited dependencies or open questions instead of inventing policy — but only when the parent/project ownership is explicit and the unresolved detail does not force a local design choice. If the local design would change depending on that answer, the item triggers the HARD-GATE.
+
+Typical inherited items:
 - Reset topology defined by the parent or project
 - Test modes and DFT hooks defined by the platform
 - Physical or power-domain assumptions supplied by integration
 
-If an inherited dependency is unknown, record it under assumptions or open questions. Do not silently pick a default that narrows the architecture.
+### Clarification Format
+
+If clarification is required, stop after listing the blocking ambiguities and ask targeted questions. Do not write a partial architecture or module-design document in the same response.
+
+- Ask only blocking questions that are required before design delivery.
+- For each question, make the blocked design decision clear.
+- When several ambiguities are tightly coupled, ask them as a short list. Keep the list limited to blocking questions only.
+- Do not mix clarification questions with architecture text, module-design text, or tentative design recommendations.
+- Split into batches when too many open items exist.
+
+**Early-exploration exception (per HARD-GATE):** when the early-exploration exception applies, the format reverses — produce the provisional sketch first, then close with a concise list of open choices that would change the structure. Each open choice must name the specific node it affects and the two or more design paths it forks into.
 
 ## Output Delivery
 
@@ -202,18 +230,14 @@ When writing a module design document, reference the parent architecture documen
 ## Self-Check Before Delivery
 
 Verify:
-- The selected mode matches the maturity of the current object
 - Architecture documents expand the tree as far as justified and mark node status clearly
 - Module design documents only target objects that are already implementation-ready
 - Layering follows `protocol/config`, `core control`, `datapath/storage`, with `ingress/schedule/egress` used as a supporting view
-- Interface contracts and inherited assumptions are explicit
-- Reset, test, and integration dependencies are recorded instead of guessed
-- No specific CBB names or instantiation choices appear in the design output
+- Interface contracts are explicit
 - Verification hooks, invariants, and edge cases are explicit enough for `rtl-verification`
 
 If a check fails:
 - Wrong mode or unstable interfaces: stop and move the object back to `architecture mode`
 - Missing budget split or timing rationale: add a provisional allocation and say what assumption drives it
 - Missing FSM, pipeline, or interface detail in a module document: expand the relevant section before delivery
-- Guessed reset/test/clock semantics: replace them with inherited assumptions or explicit open questions
 - Weak verification handoff: add a structured summary of invariants, corner cases, illegal cases, observability hooks, and risk focus items

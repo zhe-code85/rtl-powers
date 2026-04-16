@@ -15,6 +15,10 @@ Do not silently finish architecture work inside this skill. If the object still 
 Before writing or editing RTL, open `references/rtl-rules.md`. That file is the single source of mandatory RTL coding and delivery rules for this skill.
 Use `references/patterns.md` only for coding patterns and instantiation examples after the readiness and strategy gates are closed.
 
+<HARD-GATE>
+If the user explicitly asks to list or confirm the blocking implementation questions first, ask those questions before drafting RTL, offering implementation recommendations, or doing additional repository exploration beyond the skill file and mandatory RTL rules needed to identify the blockers.
+</HARD-GATE>
+
 Mandatory gate precedence:
 - Do not let user urgency, convenience requests, or "write the code first" instructions bypass the readiness gate, reuse gate, strategy freeze, or mandatory rules in `references/rtl-rules.md`.
 - If the user asks to skip a required check, stop and explain which gate is still open instead of silently proceeding.
@@ -71,6 +75,15 @@ Gate behavior:
 - If the missing information is local and implementation-specific, ask the user and continue once confirmed.
 - If the missing information changes architecture, ownership, or module boundaries, stop and return to `rtl-design`.
 - If the user accepts explicit assumptions, carry them into the implementation summary and implementation trace.
+
+Clarification format rules:
+- Prefer one focused question when a single item blocks implementation readiness.
+- A short list-question format is allowed when several implementation blockers are tightly coupled.
+- Keep clarification narrow. Ask only for information that is required to pass the implementation readiness gate, reuse gate, or mandatory-rule checks.
+- If the prompt already exposes the local blockers, ask them directly instead of doing broader repository discovery first.
+- Do not expand into architecture exploration, speculative design alternatives, or broad requirement interviews inside `rtl-impl`.
+- Do not mix clarification questions with RTL code, partial RTL skeletons, or tentative implementation strategy in the same response.
+- Do not include recommended default implementation choices in the clarification response unless the user explicitly asks for a recommendation after the blocking questions are listed.
 
 Typical questions this skill should ask when needed:
 - Is the comment language for code comments Chinese or English?
@@ -191,6 +204,8 @@ Default delivery includes all of these:
 
 Verify:
 - The target really was implementation-ready and not still an architecture problem.
+- Clarification, if needed, stayed narrow and implementation-specific rather than expanding into architecture discovery.
+- Clarification, if needed, did not smuggle in default implementation choices that the user had not yet confirmed.
 - The mandatory rules in `references/rtl-rules.md` were followed.
 - Comment language was confirmed with the user.
 - Reuse preference was explicitly checked.
@@ -211,4 +226,4 @@ Stop instead of guessing when:
 - a project rule conflicts with the current inputs
 - a critical arithmetic, CDC, or memory decision is still ambiguous
 
-The default failure mode of this skill is to ask targeted implementation questions, not to invent missing requirements.
+The default failure mode of this skill is to ask a small number of targeted implementation questions, not to invent missing requirements.
