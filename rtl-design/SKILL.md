@@ -10,14 +10,29 @@ Generate design documents for digital design engineers. This skill does not repl
 Do not select specific CBBs in this skill. Describe required structures such as FIFOs, storage arrays, arbiters, register slices, CDC structures, or counters by role and constraints only. Specific reuse mapping is deferred to `rtl-impl`.
 
 <HARD-GATE>
-After Step 0 determines the design mode, if any remaining unresolved choice would change the block structure, interface contract, timing plan, ordering/flush/retry behavior, or a CDC/reset/power boundary that affects block decomposition or interface ownership, stop and ask the user before drafting or writing any design document.
+Determine the output intent before drafting:
+- `exploration sketch`
+  Use only when the user explicitly signals they are still exploring partitioning before requirements are locked, such as "I haven't decided the internals yet", "help me think through how to partition this", or "I don't know how to split this yet". This output is provisional architecture guidance, not a formal handoff document.
+- `formal design handoff`
+  Use for architecture or module-design documents that are intended to drive RTL implementation or verification. If any unresolved choice would change the block structure, interface contract, timing plan, ordering/flush/retry behavior, or a CDC/reset/power boundary that affects decomposition or interface ownership, stop and ask the user before drafting.
 
-Exception — early exploration: if the user explicitly signals they are still in early exploration before any specific requirements are locked (e.g., "I haven't decided the internals yet", "help me think through how to partition this", "I don't know how to split this yet"), produce a provisional architecture sketch using a canonical structure for the domain. Mark every structurally-uncertain node as **TBD** and annotate each with the specific open choice it depends on. Place the blocking questions at the end of the sketch rather than before it, so the user sees the full design space first.
-
-User wording such as "pick the common approach", "use a baseline", or "start with a typical design" does not bypass this gate when the user already has a defined system context with specific requirements.
+User wording such as "pick the common approach", "use a baseline", or "start with a typical design" does not switch the intent to `exploration sketch` and does not bypass the clarification gate for `formal design handoff`.
 </HARD-GATE>
 
-## Step 0: Determine The Mode
+## Step 0: Determine The Intent And Mode
+
+Choose one output intent before selecting the design mode:
+
+- `exploration sketch`
+  Use only when the user explicitly indicates early exploration and wants to see a canonical structure before freezing requirements.
+- `formal design handoff`
+  Default for design output that should be detailed enough to guide downstream RTL implementation or verification.
+
+Rules:
+- If the user explicitly asks to write, generate, or produce a design document, architecture doc, module design doc, or design handoff, use `formal design handoff`.
+- If the user explicitly says the structure is still exploratory and asks for help thinking through the split, `exploration sketch` is allowed.
+- If the intent is ambiguous, default to `formal design handoff`.
+- The presence of unresolved alternatives such as "还没决定 A 还是 B", "可能是 X 也可能是 Y", or "还没定" does not by itself authorize `exploration sketch` when the user is asking for a design document. In that case, those are blockers for `formal design handoff`.
 
 Choose one mode before designing:
 
@@ -35,15 +50,17 @@ Choose `module-design mode` only if most of these are true:
 If the mode is still ambiguous after inspecting the request and project context, ask one question:
 `Is this object still being decomposed, or is it already ready for leaf/block-level detailed design?`
 
-Mode determination takes priority over other open questions. Once the mode is settled, remaining boundary-changing ambiguities are handled per the "Handling Missing Information" section.
+Mode determination takes priority over other open questions. Once the intent and mode are settled, remaining boundary-changing ambiguities are handled per the "Handling Missing Information" section.
+
+Additional rules:
+- `exploration sketch` always uses architecture-style decomposition. Do not use `module-design mode` for exploratory sketches.
+- `formal design handoff` may use either `architecture mode` or `module-design mode`, depending on object maturity.
 
 ## Shared Rules
 
 - Treat the current object as an ASIC subsystem, block, or module owned by a digital design engineer.
 - Use hardware semantics only: registers, combinational logic, valid/ready rules, storage ownership, clock edges, and cycle-level timing.
-- Record project dependencies explicitly. Do not invent chip-level policy for reset, DFT, clocking, test modes, power intent, or physical integration. Detailed inheritance criteria are in "What To Inherit".
-  - Inherit only when the parent or project has explicitly defined the policy and the unresolved detail does not force a local design choice. If the local design would change depending on that answer, the item triggers the HARD-GATE instead of being recorded as an assumption.
-  - When inherited, describe reset, test, or clock interfaces as inherited dependencies with explicit ownership, rather than inventing concrete ports or polarity.
+- Record project dependencies explicitly. Do not invent chip-level policy for reset, DFT, clocking, test modes, power intent, or physical integration. See "What To Inherit" for the inheritance boundary.
 - Keep protocol adaptation and configuration semantics visible, but allow light protocol state handling inside the core control layer when that simplifies the design.
 
 ## Architecture Mode
@@ -178,7 +195,7 @@ The module design document must be detailed enough that:
 
 ## Handling Missing Information
 
-This section is an expansion of the HARD-GATE — not a separate rule. The HARD-GATE states when to stop; this section provides the specific criteria for what counts as boundary-changing, what can be inherited instead of asked, and the format for clarification questions.
+This section expands the `formal design handoff` branch of the HARD-GATE. It defines what counts as boundary-changing, what may be inherited instead of asked, and the format for clarification questions. The `exploration sketch` branch is provisional by definition and must keep uncertain nodes marked `TBD` rather than silently freezing a choice.
 
 ### Boundary-Changing Criteria
 
@@ -217,7 +234,7 @@ If clarification is required, stop after listing the blocking ambiguities and as
 - Do not mix clarification questions with architecture text, module-design text, or tentative design recommendations.
 - Split into batches when too many open items exist.
 
-**Early-exploration exception (per HARD-GATE):** when the early-exploration exception applies, the format reverses — produce the provisional sketch first, then close with a concise list of open choices that would change the structure. Each open choice must name the specific node it affects and the two or more design paths it forks into.
+For `exploration sketch`, reverse the order: produce the provisional sketch first, then close with a concise list of open choices that would change the structure. Each open choice must name the specific node it affects and the two or more design paths it forks into.
 
 ## Output Delivery
 
@@ -230,14 +247,22 @@ When writing a module design document, reference the parent architecture documen
 ## Self-Check Before Delivery
 
 Verify:
+- The chosen output intent (`exploration sketch` or `formal design handoff`) matches the user's request
+- `exploration sketch` was used only for explicit early-exploration requests and kept structurally uncertain nodes marked `TBD`
+- `formal design handoff` did not proceed past unresolved boundary-changing ambiguities
 - Architecture documents expand the tree as far as justified and mark node status clearly
 - Module design documents only target objects that are already implementation-ready
 - Layering follows `protocol/config`, `core control`, `datapath/storage`, with `ingress/schedule/egress` used as a supporting view
 - Interface contracts are explicit
+- Inherited reset/test/clock/power items were truly inherited instead of guessed
 - Verification hooks, invariants, and edge cases are explicit enough for `rtl-verification`
 
 If a check fails:
+- Wrong output intent: switch to the correct intent before continuing
 - Wrong mode or unstable interfaces: stop and move the object back to `architecture mode`
+- `exploration sketch` used without explicit exploratory user intent: move back to `formal design handoff` behavior and ask blocking questions first
+- Boundary-changing ambiguity remains in `formal design handoff`: stop and ask instead of drafting
 - Missing budget split or timing rationale: add a provisional allocation and say what assumption drives it
 - Missing FSM, pipeline, or interface detail in a module document: expand the relevant section before delivery
+- Guessed inherited dependency: replace it with explicit ownership or ask the user
 - Weak verification handoff: add a structured summary of invariants, corner cases, illegal cases, observability hooks, and risk focus items

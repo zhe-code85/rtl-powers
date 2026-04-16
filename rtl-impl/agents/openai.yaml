@@ -1,7 +1,7 @@
 interface:
   display_name: "RTL Implementation"
   short_description: "Verilog RTL with reuse gates and implementation trace"
-  default_prompt: "Use $rtl-impl to confirm implementation readiness, decide CBB/IP reuse, and produce synthesizable Verilog RTL plus a lightweight implementation trace."
+  default_prompt: "Use $rtl-impl to confirm the target is implementation-ready, ask blocking implementation questions before broader discovery when the prompt already exposes them, decide CBB/IP reuse, and produce synthesizable Verilog RTL plus a lightweight implementation trace."
 
 policy:
   allow_implicit_invocation: true

@@ -1,260 +1,157 @@
 # Cocotb Verification Patterns
 
-Complete working examples for cocotb-based testbenches. Use these as starting templates when building verification environments.
+Use this file when building runnable cocotb collateral. Keep the harness small, traceable, and easy to extend.
 
----
+Assume the project verification environment is already activated before running `make`, `pytest`, or simulator commands. Keep harnesses environment-agnostic where possible, and do not bake a machine-local `venv` path into example commands or generated collateral.
 
-## Section 1: Minimal Working Testbench
+## Contents
 
-The smallest functional cocotb testbench: clock generation, reset, and one test.
+- `Artifact Layout`
+- `Minimal Harness`
+- `Core Helpers`
+- `Regression Structure`
+- `Common Pitfalls`
+
+## Artifact Layout
+
+Keep one artifact directory per executed case. Store that case's waveform, log, seed, and repro command together.
+
+Preferred layout:
+
+```text
+sim_out/
+  control_freeze_hold/
+    run.log
+    waveform.fst
+    seed.txt
+    repro.sh
+  control_zero_ftw_restart/
+    run.log
+    waveform.fst
+    seed.txt
+    repro.sh
+```
+
+Waveform rules:
+- keep waveform files inside the case directory
+- keep waveform retention enabled for every executed case, including passing cases
+- do not switch to "fail-only waveform retention" to save disk space; reduce waveform scope or rely on the compressed format instead
+- use a compressed waveform format such as `FST`, `FSDB`, or `VPD`
+- extend the project's existing compressed waveform convention when one already exists
+- update any `VCD`-based harness before adding new runnable cases
+
+One workable runner shape:
+
+```bash
+CASE=test_reset
+ARTIFACT_DIR=$PWD/sim_out/$CASE
+
+mkdir -p "$ARTIFACT_DIR"
+make SIM=verilator CASE="$CASE" ARTIFACT_DIR="$ARTIFACT_DIR" WAVE_FORMAT=fst \
+  | tee "$ARTIFACT_DIR/run.log"
+printf 'make SIM=verilator CASE=%s ARTIFACT_DIR=%s WAVE_FORMAT=fst\n' \
+  "$CASE" "$ARTIFACT_DIR" > "$ARTIFACT_DIR/repro.sh"
+```
+
+## Minimal Harness
+
+Minimal cocotb test:
 
 ```python
-# test_my_module.py
 import cocotb
 from cocotb.clock import Clock
-from cocotb.triggers import RisingEdge, Timer
+from cocotb.triggers import RisingEdge
+
+
+async def apply_reset(dut, cycles=5):
+    dut.rst_n.value = 0
+    for _ in range(cycles):
+        await RisingEdge(dut.clk)
+    dut.rst_n.value = 1
+    await RisingEdge(dut.clk)
+    await RisingEdge(dut.clk)
+
 
 @cocotb.test()
 async def test_reset(dut):
-    """Verify DUT resets to known state."""
-    # Start clock: 100 MHz (10ns period)
-    clock = Clock(dut.clk, 10, units="ns")
-    cocotb.start_soon(clock.start())
-
-    # Apply reset
-    dut.rst_n.value = 0
-    await Timer(30, units="ns")  # hold reset for 3 cycles
-    dut.rst_n.value = 1
-    await RisingEdge(dut.clk)
-    await RisingEdge(dut.clk)  # settle 2 cycles after reset
-
-    # Check reset state
-    assert dut.data_out.value == 0, f"Expected 0 after reset, got {dut.data_out.value}"
-    assert dut.valid_out.value == 0, "valid should be low after reset"
+    cocotb.start_soon(Clock(dut.clk, 10, units="ns").start())
+    await apply_reset(dut)
+    assert dut.valid_out.value == 0
+    assert dut.data_out.value == 0
 ```
 
-Corresponding Makefile:
+Minimal Makefile skeleton:
 
 ```makefile
-# Makefile
 SIM ?= verilator
 TOPLEVEL_LANG = verilog
 VERILOG_SOURCES = $(PWD)/rtl/my_module.v
 MODULE = test_my_module
 TOPLEVEL = my_module
+CASE ?= test_reset
+ARTIFACT_DIR ?= $(PWD)/sim_out/$(CASE)
+SIM_BUILD = $(ARTIFACT_DIR)/sim_build
+COCOTB_RESULTS_FILE = $(ARTIFACT_DIR)/results.xml
+
+# Assume the project verification environment is already active.
+# Keep the harness generic instead of hardcoding a local venv path.
+
+# Hook these variables into the local harness so the simulator writes a
+# compressed waveform such as waveform.fst, waveform.fsdb, or waveform.vpd
+# under $(ARTIFACT_DIR) instead of a shared dump.vcd.
 include $(shell cocotb-config --makefiles)/Makefile.sim
 ```
 
----
+## Core Helpers
 
-## Section 2: Coroutine Patterns
+Keep helpers lightweight. Add more structure only when reuse is real.
 
-### Clock Generation
+Clock and reset:
 
 ```python
 from cocotb.clock import Clock
+from cocotb.triggers import RisingEdge
 
-# Basic: fixed frequency
-clock = Clock(dut.clk, 10, units="ns")  # 100 MHz
-cocotb.start_soon(clock.start())
 
-# With phase offset (for multi-clock CDC tests)
-clock_a = Clock(dut.clk_a, 10, units="ns")
-clock_b = Clock(dut.clk_b, 8, units="ns")  # 125 MHz, different frequency
-cocotb.start_soon(clock_a.start())
-cocotb.start_soon(clock_b.start())
-```
+async def start_clock(dut, name="clk", period_ns=10):
+    cocotb.start_soon(Clock(getattr(dut, name), period_ns, units="ns").start())
 
-### Reset Sequence
-
-```python
-from cocotb.triggers import RisingEdge, Timer
 
 async def apply_reset(dut, clk_name="clk", rst_name="rst_n", cycles=5):
-    """Apply synchronous active-low reset for specified cycles."""
     rst = getattr(dut, rst_name)
     clk = getattr(dut, clk_name)
-
     rst.value = 0
     for _ in range(cycles):
         await RisingEdge(clk)
     rst.value = 1
     await RisingEdge(clk)
-    await RisingEdge(clk)  # settle after reset release
 ```
 
-### Valid-Ready Handshake Driver
+Handshake driver:
 
 ```python
 from cocotb.triggers import RisingEdge
 
-async def drive_valid_ready(dut, data, clk_name="clk"):
-    """Drive a valid-ready handshake transaction.
-    Waits for ready before deasserting valid.
-    Handles backpressure (ready deasserted mid-transfer).
-    """
-    clk = getattr(dut, clk_name)
 
+async def drive_valid_ready(dut, data, clk_name="clk"):
+    clk = getattr(dut, clk_name)
     dut.data_in.value = data
     dut.valid_in.value = 1
-
-    # Wait for transfer: valid AND ready
     while True:
         await RisingEdge(clk)
-        if dut.ready_out.value == 1 and dut.valid_in.value == 1:
+        if dut.valid_in.value == 1 and dut.ready_out.value == 1:
             break
-
     dut.valid_in.value = 0
 ```
 
-### Backpressure-Aware Producer
-
-```python
-import cocotb
-from cocotb.triggers import RisingEdge
-
-async def producer(dut, data_list, valid_sig, ready_sig, data_sig, clk_name="clk"):
-    """Send a list of data words with valid-ready handshaking.
-    Respects backpressure from consumer.
-    """
-    clk = getattr(dut, clk_name)
-    for word in data_list:
-        data_sig.value = word
-        valid_sig.value = 1
-        # Wait for acceptance
-        while True:
-            await RisingEdge(clk)
-            if ready_sig.value == 1:
-                break
-        valid_sig.value = 0
-```
-
-### Concurrent Stimulus (Fork/Join)
-
-```python
-import cocotb
-from cocotb.triggers import RisingEdge, First, Event
-
-@cocotb.test()
-async def test_concurrent_read_write(dut):
-    """Write and read simultaneously to test concurrent access."""
-    clock = Clock(dut.clk, 10, units="ns")
-    cocotb.start_soon(clock.start())
-    await apply_reset(dut)
-
-    write_data = list(range(20))
-
-    async def writer():
-        for val in write_data:
-            dut.wr_en.value = 1
-            dut.wr_data.value = val
-            await RisingEdge(dut.clk)
-            # Handle full condition
-            while dut.full.value == 1:
-                dut.wr_en.value = 0
-                await RisingEdge(dut.clk)
-        dut.wr_en.value = 0
-
-    async def reader():
-        results = []
-        for _ in range(len(write_data)):
-            await RisingEdge(dut.clk)
-            while dut.empty.value == 1:
-                await RisingEdge(dut.clk)
-            dut.rd_en.value = 1
-            await RisingEdge(dut.clk)
-            results.append(int(dut.rd_data.value))
-        dut.rd_en.value = 0
-        return results
-
-    # Run both concurrently
-    write_task = cocotb.start_soon(writer())
-    read_task = cocotb.start_soon(reader())
-
-    await write_task
-    results = await read_task
-
-    assert results == write_data, f"Data mismatch: {results} != {write_data}"
-```
-
----
-
-## Section 3: Driver / Monitor / Scoreboard
-
-### Lightweight Driver
-
-```python
-class AxiLiteDriver:
-    """Lightweight AXI4-Lite driver without cocotb-bus dependency.
-    Handles AW/W/B and AR/R channels.
-    """
-    def __init__(self, dut, prefix="s_axi_", clk="clk"):
-        self.dut = dut
-        self.prefix = prefix
-        self.clk = getattr(dut, clk)
-
-    async def write(self, addr, data):
-        """Single AXI-Lite write transaction."""
-        d = self.dut
-        p = self.prefix
-
-        # AW phase
-        getattr(d, f"{p}awaddr").value = addr
-        getattr(d, f"{p}awvalid").value = 1
-        while getattr(d, f"{p}awready").value != 1:
-            await RisingEdge(self.clk)
-        await RisingEdge(self.clk)
-        getattr(d, f"{p}awvalid").value = 0
-
-        # W phase
-        getattr(d, f"{p}wdata").value = data
-        getattr(d, f"{p}wvalid").value = 1
-        while getattr(d, f"{p}wready").value != 1:
-            await RisingEdge(self.clk)
-        await RisingEdge(self.clk)
-        getattr(d, f"{p}wvalid").value = 0
-
-        # B phase
-        getattr(d, f"{p}bready").value = 1
-        while getattr(d, f"{p}bvalid").value != 1:
-            await RisingEdge(self.clk)
-        bresp = int(getattr(d, f"{p}bresp").value)
-        await RisingEdge(self.clk)
-        getattr(d, f"{p}bready").value = 0
-        assert bresp == 0, f"Write error: bresp={bresp}"
-
-    async def read(self, addr):
-        """Single AXI-Lite read transaction."""
-        d = self.dut
-        p = self.prefix
-
-        getattr(d, f"{p}araddr").value = addr
-        getattr(d, f"{p}arvalid").value = 1
-        while getattr(d, f"{p}arready").value != 1:
-            await RisingEdge(self.clk)
-        await RisingEdge(self.clk)
-        getattr(d, f"{p}arvalid").value = 0
-
-        getattr(d, f"{p}rready").value = 1
-        while getattr(d, f"{p}rvalid").value != 1:
-            await RisingEdge(self.clk)
-        rdata = int(getattr(d, f"{p}rdata").value)
-        rresp = int(getattr(d, f"{p}rresp").value)
-        await RisingEdge(self.clk)
-        getattr(d, f"{p}rready").value = 0
-        assert rresp == 0, f"Read error: rresp={rresp}"
-        return rdata
-```
-
-### Monitor
+Monitor and scoreboard shape:
 
 ```python
 from cocotb.triggers import RisingEdge
+
 
 class HandshakeMonitor:
-    """Observes valid-ready interface and records transactions."""
     def __init__(self, dut, valid_sig, ready_sig, data_sig, clk_name="clk"):
-        self.dut = dut
         self.valid_sig = getattr(dut, valid_sig)
         self.ready_sig = getattr(dut, ready_sig)
         self.data_sig = getattr(dut, data_sig)
@@ -262,297 +159,48 @@ class HandshakeMonitor:
         self.transactions = []
 
     async def run(self):
-        """Continuously monitor and record transfers."""
         while True:
             await RisingEdge(self.clk)
             if self.valid_sig.value == 1 and self.ready_sig.value == 1:
                 self.transactions.append(int(self.data_sig.value))
 
-    def get_transactions(self):
-        """Return recorded transactions and clear buffer."""
-        result = self.transactions.copy()
-        self.transactions.clear()
-        return result
+
+def check_sequence(actual, expected):
+    assert actual == expected, f"Mismatch: {actual} != {expected}"
 ```
 
-### Scoreboard
+Reference model guidance:
+- use a Python reference model when direct expected-value checks become fragile
+- keep the model at contract level, not internal implementation level
+- place model state beside the scoreboard, not scattered through tests
+
+## Regression Structure
+
+Recommended split:
+- one test file per dominant verification bucket when practical
+- one case per primary verification question
+- shared reset, helpers, and reference models in reusable support files
+
+Useful `pytest` shape:
 
 ```python
-class Scoreboard:
-    """Compare expected (reference model) vs actual (DUT) outputs."""
-    def __init__(self):
-        self.expected = []
-        self.mismatches = []
-
-    def add_expected(self, value):
-        """Add an expected output value."""
-        self.expected.append(value)
-
-    def compare(self, actual):
-        """Compare actual output against next expected value."""
-        if not self.expected:
-            self.mismatches.append(f"Unexpected output: {actual} (no expected value)")
-            return False
-
-        exp = self.expected.pop(0)
-        if actual != exp:
-            self.mismatches.append(f"Mismatch: expected {exp}, got {actual}")
-            return False
-        return True
-
-    def report(self):
-        """Report all mismatches. Raise if any found."""
-        if self.mismatches:
-            msg = "\n".join(self.mismatches)
-            assert False, f"Scoreboard failures:\n{msg}"
-
-    @property
-    def remaining(self):
-        """Number of unmatched expected values."""
-        return len(self.expected)
-```
-
-### Reference Model Pattern
-
-```python
-class CrcReferenceModel:
-    """Pure Python reference model for deterministic expected values."""
-
-    def __init__(self, polynomial=0x1021, init=0xFFFF):
-        self.polynomial = polynomial
-        self.init = init
-
-    def update(self, data_bytes):
-        crc = self.init
-        for byte in data_bytes:
-            crc ^= (byte & 0xFF) << 8
-            for _ in range(8):
-                if crc & 0x8000:
-                    crc = ((crc << 1) ^ self.polynomial) & 0xFFFF
-                else:
-                    crc = (crc << 1) & 0xFFFF
-        return crc
-
-@cocotb.test()
-async def test_crc_matches_reference_model(dut):
-    """Use a Python reference model when direct checking is error-prone."""
-    model = CrcReferenceModel()
-    payload = [0x12, 0x34, 0x56]
-
-    # ... drive payload into DUT ...
-    expected_crc = model.update(payload)
-    actual_crc = int(dut.crc_out.value)
-    assert actual_crc == expected_crc
-```
-
----
-
-## Section 4: Bus Extension Usage
-
-For standard bus interfaces such as AXI or APB, a protocol-specific extension library can be cleaner than a hand-written driver.
-
-```python
-# Requires: pip install cocotbext-axi
-from cocotbext.axi import AxiLiteBus, AxiLiteMaster
-
-@cocotb.test()
-async def test_with_cocotb_bus(dut):
-    """Use cocotbext-axi AXI-Lite master for cleaner bus driving."""
-    clock = Clock(dut.clk, 10, units="ns")
-    cocotb.start_soon(clock.start())
-    await apply_reset(dut)
-
-    # Create AXI-Lite master connected to DUT signals
-    axi_master = AxiLiteMaster(
-        AxiLiteBus.from_prefix(dut, "s_axi"),
-        dut.clk,
-        dut.rst_n
-    )
-
-    # Write and read using high-level API
-    await axi_master.write_dword(0x0000, 0xDEADBEEF)
-    value = await axi_master.read_dword(0x0000)
-    assert value == 0xDEADBEEF
-```
-
-When to use an extension library vs lightweight:
-- **Extension library**: Standard bus protocol with maintained drivers, helpers, and protocol-aware utilities
-- **Lightweight**: Custom protocols, non-standard interfaces, minimal dependency requirements
-
----
-
-## Section 5: Regression Structure
-
-### pytest Integration
-
-```python
-# conftest.py
-import cocotb
 import pytest
 
-# No special conftest needed — cocotb discovers tests automatically
-# when run via Makefile. For pytest-native discovery:
+
+@pytest.mark.parametrize("case_name", ["basic_reset_idle", "boundary_wrap"])
+def test_cases(case_name):
+    assert case_name
 ```
 
-```python
-# test_fifo_regression.py
-import cocotb
-from cocotb.clock import Clock
-from cocotb.triggers import RisingEdge
-from cocotb.regression import TestFactory
+CI-friendly runner guidance:
+- pass `CASE`, `ARTIFACT_DIR`, and waveform format through the harness
+- keep simulator build products under the case directory or a clearly namespaced subdirectory
+- keep the repro command stable enough that a failed case can be rerun directly
 
-async def test_fifo_basic(dut, depth, width):
-    """Parameterized FIFO test — runs for each depth/width combo."""
-    clock = Clock(dut.clk, 10, units="ns")
-    cocotb.start_soon(clock.start())
+## Common Pitfalls
 
-    dut.rst_n.value = 0
-    await RisingEdge(dut.clk)
-    await RisingEdge(dut.clk)
-    dut.rst_n.value = 1
-    await RisingEdge(dut.clk)
-
-    # Fill FIFO to depth
-    for i in range(depth):
-        dut.wr_en.value = 1
-        dut.wr_data.value = i & ((1 << width) - 1)
-        await RisingEdge(dut.clk)
-        assert dut.full.value == 0, f"FIFO full at {i}/{depth}"
-
-    dut.wr_en.value = 0
-    assert dut.full.value == 1, f"FIFO not full after {depth} writes"
-
-    # Drain FIFO
-    for i in range(depth):
-        dut.rd_en.value = 1
-        await RisingEdge(dut.clk)
-        expected = i & ((1 << width) - 1)
-        actual = int(dut.rd_data.value)
-        assert actual == expected, f"Read mismatch at {i}: expected {expected}, got {actual}"
-
-    dut.rd_en.value = 0
-    assert dut.empty.value == 1, "FIFO not empty after draining"
-
-# Register parameterized variants
-factory = TestFactory(test_fifo_basic)
-factory.add_option("depth", [4, 8, 16, 32])
-factory.add_option("width", [8, 16, 32])
-factory.generate_tests()
-```
-
-Parameterized regression strategy:
-- Keep one or two smoke configurations for quick bring-up.
-- Add boundary tuples such as minimum width, minimum depth, and non-power-of-2 cases.
-- Reserve the full cross product for scheduled regression only when runtime is acceptable.
-- Record which tuples are omitted so coverage gaps stay explicit.
-
-### CI-Friendly Makefile Runner
-
-```makefile
-# run_regression.mk
-SIM ?= verilator
-TOPLEVEL_LANG = verilog
-VERILOG_SOURCES = $(PWD)/rtl/fifo_sync.v
-MODULE = test_fifo_regression
-TOPLEVEL = fifo_sync
-
-# CI: run with junit XML output
-COCOTB_RESULTS_FILE = results.xml
-
-include $(shell cocotb-config --makefiles)/Makefile.sim
-```
-
-```bash
-# CI pipeline command
-make -f run_regression.mk SIM=verilator COCOTB_RESULTS_FILE=results.xml
-```
-
----
-
-## Section 6: Common Pitfalls
-
-### Delta Cycles vs Simulation Time
-
-Cocotb triggers fire in delta cycles within a simulation time step. When you `await RisingEdge(clk)`, the coroutine resumes at the delta cycle where clk transitions, NOT at the next simulation time step. Signal reads after `RisingEdge` may still reflect the prior write phase unless you wait for the appropriate scheduling point.
-
-Version note:
-- Cocotb 1.x and 2.x differ in scheduler details around `ReadOnly`, `ReadWrite`, and post-edge sampling.
-- Prefer explicit trigger choices over relying on accidental delta-cycle behavior, especially in mixed-version repositories.
-
-```python
-# WRONG: read happens at the edge without a stable sampling point
-await RisingEdge(dut.clk)
-value = int(dut.data.value)  # might be stale
-
-# BETTER: sample in a read-only phase after the clock edge
-from cocotb.triggers import ReadOnly
-
-await RisingEdge(dut.clk)
-await ReadOnly()
-value = int(dut.data.value)
-```
-
-### Signal Access Gotchas
-
-```python
-# Signal values are NOT plain Python ints
-# Always cast to int for comparison
-val = dut.counter.value
-if val == 5:      # works
-    pass
-if int(val) > 3:  # safer for arithmetic
-    pass
-
-# Writing values: use .value assignment
-dut.wr_data.value = 42
-# NOT: dut.wr_data = 42  (replaces the handle)
-
-# Undefined signals return 'x' or 'z'
-val = dut.signal.value
-if val.is_resolvable:  # check before int() conversion
-    number = int(val)
-else:
-    # Signal is undefined — handle accordingly
-    pass
-```
-
-### Race Conditions in Stimulus
-
-```python
-# WRONG: stimulus and check in same delta
-dut.wr_en.value = 1
-dut.wr_data.value = 42
-await RisingEdge(dut.clk)  # DUT sees the inputs THIS cycle
-result = int(dut.rd_data.value)  # may not be ready yet
-
-# CORRECT: drive, wait for effect, then check
-dut.wr_en.value = 1
-dut.wr_data.value = 42
-await RisingEdge(dut.clk)
-dut.wr_en.value = 0
-await RisingEdge(dut.clk)  # let output propagate
-result = int(dut.rd_data.value)
-```
-
-### Timeout Watchdog
-
-```python
-from cocotb.triggers import with_timeout
-
-@cocotb.test()
-async def test_no_deadlock(dut):
-    """Verify DUT doesn't hang during backpressure."""
-    clock = Clock(dut.clk, 10, units="ns")
-    cocotb.start_soon(clock.start())
-    await apply_reset(dut)
-
-    # This should complete within 50us
-    async def write_sequence():
-        for i in range(100):
-            await drive_valid_ready(dut, i)
-
-    try:
-        await with_timeout(write_sequence(), 50, "us")
-    except Exception:
-        assert False, "DUT appears to deadlock under backpressure"
-```
+- Do not rely on delta-cycle timing guesses when a clock edge or explicit trigger is the real contract.
+- Do not bury unrelated checks inside one long case just because the setup is shared.
+- Do not build a second harness when the repository already has a usable one.
+- Do not sample waveforms into a shared `dump.vcd`; keep one retained compressed waveform per executed case.
+- Do not overuse heavy bus libraries when a small hand-written driver is easier to review and maintain.

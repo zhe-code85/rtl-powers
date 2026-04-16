@@ -77,6 +77,27 @@
       "prompt": "现有 `test_timer_control_behavior` 已经先验证 reset 后 idle，再验证 timeout 触发，再验证 flush 恢复，再验证随机长等待下无假 timeout。最近定位失败越来越难。请判断这个已有 case 是否应该拆分，如果要拆，按什么原则拆。",
       "expected_output": "应该识别这是一个过大的多阶段 case，并按 dominant intent 内的 primary verification question、pass criteria、checker style 或 failure story 拆分。输出应明确提到 later-stage dependency / debug ambiguity 是拆分信号，而不是继续往一个 case 里加注释。",
       "files": []
+    },
+    {
+      "id": 12,
+      "name": "verification-case-artifacts-require-per-case-directory-and-compressed-waveforms",
+      "prompt": "请为 `cfg_timer` 搭一个可执行 cocotb 回归。计划里有 `basic_reset_idle`、`timeout_boundary_max`、`timeout_flush_collision` 三个 runnable case。为了省事，我想把所有日志和波形都丢到一个公共 `sim_out/` 目录里，并统一输出 `dump.vcd`。",
+      "expected_output": "应保持每个执行过的 case 一个独立 artifact 目录，并把该 case 的日志、seed、repro 信息和波形放在一起。每个执行过的 case 都应保留可查波形。波形应使用压缩格式并随 simulator 选择，例如 Verilator 流优先 FST，VCS 流优先 FSDB 或 VPD；不应接受公共目录加单个 VCD 的做法。",
+      "files": []
+    },
+    {
+      "id": 13,
+      "name": "verification-existing-vcd-harness-must-be-updated-before-new-runnable-cases",
+      "prompt": "仓库里现有验证 harness 默认把每个测试都写到共享 `waves/dump.vcd`。现在请你继续给 `packet_timeout_unit` 增加新的 runnable case，并保持可复现的波形留存。",
+      "expected_output": "应先指出现有 harness 的波形留存方式不满足技能规则，并把新 case 的 artifact 结构收成每个执行过的 case 独立目录，同时把波形格式切换到压缩格式；如果项目环境支持 VCS，则应优先沿用 FSDB 或 VPD 之类的压缩格式；若是 Verilator，则优先 FST。每个执行过的 case 都应留下可查波形，不能继续沿用共享 VCD。",
+      "files": []
+    },
+    {
+      "id": 14,
+      "name": "verification-waveform-retention-applies-to-passing-cases-too",
+      "prompt": "请继续完善 `pulse_sync` 的回归。为了节省空间，我打算只给失败 case 保留波形，pass 的 case 只留日志，不留波形文件。其他目录结构都按每 case 独立目录来做。",
+      "expected_output": "应明确拒绝“只给失败 case 留波形”的策略。波形留存适用于每个执行过的 case，而不只是失败 case。输出应要求 pass 和 fail 的 case 都在各自目录内保留压缩波形，并继续避免使用 VCD；如果担心空间，应缩小波形范围、时间窗口或继续使用压缩格式，而不是改成 fail-only retention。",
+      "files": []
     }
   ]
 }

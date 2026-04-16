@@ -1,7 +1,7 @@
 interface:
   display_name: "RTL Verification"
   short_description: "Risk-driven RTL verification planning and collateral"
-  default_prompt: "Use $rtl-verification to discover the runnable environment when needed, analyze RTL weaknesses, derive feature positive/adverse scenarios, and produce a verification plan plus cocotb or Verilog collateral when requested."
+  default_prompt: "Use $rtl-verification to extend an existing usable verification harness before creating a new runnable flow; if the prompt says the repository already has a Makefile, pytest entry, or reusable cocotb harness, treat that as the planning baseline first and only reconcile against local files when a concrete edit is blocked. For runnable collateral, assume the project verification environment has already been activated in the current shell, rely on that active environment for python/pytest/cocotb/simulator tools, and do not hardcode a machine-local venv path into the harness just to make the current shell work. When the harness is simulator-agnostic, prefer VCS over Verilator, keep cocotb when it is already present or available, discover the runnable environment only when the request needs executable collateral, treat analysis-only or planning-only work as not requiring simulator/framework selection yet, and in those analysis-only cases deliver the weakness analysis and verification plan directly rather than commentary about skill maintenance. For runnable collateral, keep one retained compressed waveform per executed case instead of VCD."
 
 policy:
   allow_implicit_invocation: true

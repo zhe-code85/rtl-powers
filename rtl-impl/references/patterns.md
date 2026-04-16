@@ -10,8 +10,7 @@ Keep this file minimal. Use one preferred coding style unless a project rule ove
 - Use one sequential register block plus combinational next-value blocks.
 - Keep the registered state on the base signal name.
 - Keep the combinational next value on the `*_comb` signal name.
-- Drive only one `*_comb` signal per combinational block.
-- Do not assign multiple next-value signals in the same `always @(*)` block.
+- Drive one `*_comb` signal per combinational block.
 - Default every `*_comb` to hold the current registered value so every path stays assigned.
 - Make widths, truncation, concatenation, and sign extension explicit.
 - Use explicit `$signed()` when signed arithmetic needs sign extension or width extension.

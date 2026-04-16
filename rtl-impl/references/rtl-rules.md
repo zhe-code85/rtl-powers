@@ -21,7 +21,8 @@ Project-specific rule files may add tighter constraints, but they must not relax
 ## Combinational Logic
 
 - Combinational logic must assign a defined value on every path. Do not infer latches.
-- When using next-value coding, each combinational block may drive only one next-value signal. Do not assign multiple `*_comb` signals in the same `always @(*)` block.
+- When using next-value coding for registered state, keep the current registered state on the base signal name and use `*_comb` for the next-value signal.
+- Use one `always @(*)` combinational block for each `*_comb` signal.
 
 ## Arithmetic
 

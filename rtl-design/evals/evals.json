@@ -33,7 +33,7 @@
       "id": 5,
       "name": "mode-inference-colloquial-dma",
       "prompt": "帮我设计一个 DMA engine。它要从内存读数据再推给下游流接口，现在我还没想清楚内部应该拆成哪几个块，也不确定哪些块先做详细设计。目标频率 900MHz，7nm，支持 backpressure。",
-      "expected_output": "技能应自行判断当前更适合 architecture mode，而不是直接进入 leaf module 详细设计。输出应体现：\n1. 对口语化需求的正确触发\n2. architecture mode 的分层、模块树和状态标注\n3. 不把对象误判成已可直接实现的单一模块",
+      "expected_output": "技能应识别这是显式的早期探索请求，因此可以走 `exploration sketch` 路径，但输出仍应保持 architecture-style decomposition，而不是直接进入 leaf module 详细设计。输出应体现：\n1. 对口语化探索需求的正确触发\n2. 使用 architecture-style 的分层、模块树和状态标注\n3. 结构不确定处标为 `TBD` 或明确依赖的 open choice\n4. 不把对象误判成已可直接实现的单一模块",
       "files": []
     },
     {

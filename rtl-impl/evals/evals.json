@@ -53,15 +53,22 @@
     {
       "id": 8,
       "name": "impl-next-value-single-comb-block-per-signal",
-      "prompt": "请按 `rtl-impl` 为一个包含 `state_q`、`count_q`、`valid_q` 三个寄存状态的模块写 next-value 风格 RTL。项目要求使用 `*_comb` 命名。为了省事，把三个 next-value 都写进同一个 `always @(*)` 里统一计算。",
-      "expected_output": "不应接受把多个 `*_comb` 信号写在同一个组合块里的做法。应该遵守 `rtl-rules.md` 的硬规则：每个 next-value 信号各自使用独立的 `always @(*)` 组合块；如果采用 next-value 编码，则 `state_comb`、`count_comb`、`valid_comb` 等都应分别计算，而不是混写在单个组合块中。",
+      "prompt": "请按 `rtl-impl` 为一个包含 `state`、`count`、`valid` 三个寄存状态的模块写 next-value 风格 RTL。项目要求使用当前态裸名、next-value 用 `*_comb` 命名。为了省事，把三个 next-value 都写进同一个 `always @(*)` 里统一计算。",
+      "expected_output": "应遵守 `rtl-rules.md` 的 next-value 规则：当前态使用裸名，`state_comb`、`count_comb`、`valid_comb` 作为各自的 next-value 信号，并分别使用独立的 `always @(*)` 组合块计算。",
       "files": []
     },
     {
       "id": 9,
       "name": "impl-next-value-rule-overrides-user-preference",
       "prompt": "请实现一个 next-value 风格的 `event_counter`。我明确要求把 `count_comb`、`overflow_comb`、`irq_comb` 三个 next-value 都放进同一个 `always @(*)`，这样我看着更集中。其他都按 `rtl-impl` 来做。",
-      "expected_output": "即使用户显式要求把多个 `*_comb` 信号合并进一个组合块，也不应照做。应该指出这与 `rtl-rules.md` 的强制规则冲突，并坚持采用每个 next-value 信号一个独立 `always @(*)` 组合块的写法；必要时应先澄清或说明无法按该冲突要求实现。",
+      "expected_output": "应保持 `rtl-rules.md` 的 next-value 结构：`count_comb`、`overflow_comb`、`irq_comb` 各自由独立的 `always @(*)` 组合块计算，并在需要时明确说明该实现规则优先于用户提出的合并写法。",
+      "files": []
+    },
+    {
+      "id": 11,
+      "name": "impl-next-value-naming-must-use-base-and-comb",
+      "prompt": "请按 `rtl-impl` 写一个二段式 next-value 风格的累加器。我习惯把寄存器当前值写成 `phase_acc_q`，把组合 next-state 写成 `phase_acc_comb`，例如在 `always @(*)` 里先 `phase_acc_comb = phase_acc_q;`，然后再根据 `phase_load` 和 `en` 覆盖。你就按这个命名来写。",
+      "expected_output": "应使用 `rtl-rules.md` 规定的二段式命名：当前态寄存器使用裸名 `phase_acc`，next-value 使用 `phase_acc_comb`。如果采用 next-value 编码，组合块驱动 `phase_acc_comb`，顺序块更新 `phase_acc`。",
       "files": []
     },
     {
